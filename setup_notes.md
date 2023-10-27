@@ -1,3 +1,5 @@
+## Setup
+
 Clone the repo
 ```sh
 git clone git@github.com:ez2rok/meru.git
@@ -22,6 +24,8 @@ Download the small meru model
 wget https://dl.fbaipublicfiles.com/meru/meru_vit_s.pth -P checkpoints
 ```
 
+## The Basics
+
 Now let's try several commands.
 
 1. Image traversal
@@ -33,14 +37,14 @@ python scripts/image_traversals.py --image-path assets/taj_mahal.jpg \
 
 2. Zero-shot image classification
    ```sh
-   python scripts/evaluate.py --config configs/small/eval_zero_shot_classification_small.py \
+   python scripts/evaluate.py --config configs/demo/eval_zero_shot_classification.py \
     --checkpoint-path checkpoints/meru_vit_s.pth \
     --train-config configs/train_meru_vit_s.py
    ```
 
 3. Linear probe classification
    ```sh
-   python scripts/evaluate.py --config configs/small/eval_linprobe_classification_small.py \
+   python scripts/evaluate.py --config configs/demo/eval_linprobe_classification.py \
     --checkpoint-path checkpoints/meru_vit_s.pth \
     --train-config configs/train_meru_vit_s.py 
     ```
@@ -54,7 +58,11 @@ python scripts/image_traversals.py --image-path assets/taj_mahal.jpg \
    ```
    and run the retrieval script
    ```sh
-   python scripts/evaluate.py --config configs/small/eval_zero_shot_retrieval_small.py \
+   python scripts/evaluate.py --config configs/demo/eval_zero_shot_retrieval.py \
     --checkpoint-path checkpoints/meru_vit_s.pth \
     --train-config configs/train_meru_vit_s.py
    ```
+
+## Training
+
+How to get a symlink to work: [stackoverflow](https://superuser.com/questions/511900/why-doesnt-my-symbolic-link-work).
