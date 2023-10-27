@@ -207,7 +207,7 @@ class LinearProbeClassificationEvaluator:
                     DatasetCatalog.build(
                         dname, self._data_dir, split, self._image_transform
                     ),
-                    batch_size=128,
+                    batch_size=64, # lowered from 128 to fit in memory
                     num_workers=self._num_workers,
                 )
                 image_feats[split], labels[split] = _encode_dataset(
