@@ -17,7 +17,7 @@ python -m pip install -r requirements.txt
 python setup.py develop
 ```
 
-Download the model
+Download the small meru model
 ```sh
 wget https://dl.fbaipublicfiles.com/meru/meru_vit_s.pth -P checkpoints
 ```
