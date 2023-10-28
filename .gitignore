@@ -45,3 +45,6 @@ output/
 
 # vim stuff
 *.swp
+
+# wandb stuff
+wandb/
