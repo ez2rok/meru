@@ -65,4 +65,10 @@ python scripts/image_traversals.py --image-path assets/taj_mahal.jpg \
 
 ## Training
 
-How to get a symlink to work: [stackoverflow](https://superuser.com/questions/511900/why-doesnt-my-symbolic-link-work).
+How to get a symlink to work:
+[stackoverflow](https://superuser.com/questions/511900/why-doesnt-my-symbolic-link-work).
+
+To train, run the command:
+```sh
+python scripts/train.py --config configs/train_meru_vit_s.py --num-gpus 2 --output-dir ./output train.total_batch_size=512
+```
