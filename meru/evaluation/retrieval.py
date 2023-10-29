@@ -12,6 +12,7 @@ from pathlib import Path
 import torch
 import torchvision.transforms as T
 from tqdm import tqdm
+from loguru import logger
 
 from meru import lorentz as L
 from meru.data.evaluation import CocoCaptions, Flickr30kCaptions
@@ -64,6 +65,7 @@ class ZeroShotRetrievalEvaluator:
         results_dict = {}
 
         for dname in self._datasets:
+            logger.info(f"Zero-shot retrieval evaluation for {dname}:")
             data_loader = DatasetCatalog.build(
                 dname, self._data_dir, "test", image_transform
             )
@@ -182,7 +184,12 @@ def _encode_dataset(
 
         for _id in inst["caption_ids"]:
             encoded_data["text_to_image_gt"][_id].add(image_id)
-
+        
+        # check if model is an instance of torh DistributedDataParallel
+        # https://github.com/huggingface/transformers/issues/18974#issuecomment-1242985539
+        if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+            model = model.module
+        
         image_feats = model.encode_image(
             inst["image"][None, ...].to(model.device), project=True
         )

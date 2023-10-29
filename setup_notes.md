@@ -70,5 +70,5 @@ How to get a symlink to work:
 
 To train, run the command:
 ```sh
-python scripts/train.py --config configs/train_meru_vit_s.py --num-gpus 2 --output-dir ./output train.total_batch_size=512
+python scripts/train.py --log-period 5 --eval-period 10 --config configs/train_meru_vit_s.py --num-gpus 2 --output-dir ./output train.total_batch_size=128
 ```

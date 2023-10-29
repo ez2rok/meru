@@ -17,6 +17,7 @@ import wandb
 import numpy as np
 from loguru import logger
 from omegaconf import OmegaConf
+from hydra.utils import instantiate
 from torch.cuda import amp
 
 import meru.utils.distributed as dist
@@ -24,6 +25,9 @@ from meru.config import LazyConfig, LazyFactory
 from meru.tokenizer import Tokenizer
 from meru.utils.checkpointing import CheckpointManager
 from meru.utils.timer import Timer
+from configs.test.linprobe_classification import evaluator as linprobe_clf_evaluator
+from configs.test.zero_shot_classification import evaluator as zeroshot_clf_evaluator
+from configs.test.zero_shot_retrieval import evaluator as zeroshot_retrieval_evaluator
 
 
 # fmt: off
@@ -46,6 +50,10 @@ parser.add_argument(
 parser.add_argument(
     "--log-period", type=int, default=100,
     help="Log to stdout/wandb periodically (only main process).",
+)
+parser.add_argument(
+    '--eval-period', type=int, default=1000,
+    help="Evaluate on validation set periodically (only main process).",
 )
 parser.add_argument(
     "--num-machines", type=int, default=1,
@@ -133,6 +141,12 @@ def main(_A: argparse.Namespace):
         scaler=scaler,
     )
     start_iteration = checkpoint_manager.resume() if _A.resume else 0
+    
+    evaluators = {
+        # "zero_shot_classification": instantiate(zeroshot_clf_evaluator),
+        "zero_shot_retrieval": instantiate(zeroshot_retrieval_evaluator),
+        # "linear_probe_classification": instantiate(linprobe_clf_evaluator),
+    }
 
     # Create an iterator from dataloader to sample batches perpetually.
     dataloader_iter = iter(dataloader)
@@ -155,6 +169,7 @@ def main(_A: argparse.Namespace):
         data_time = time.perf_counter() - data_time
 
         timer.tic()
+        model.train()
         optimizer.zero_grad()
         with amp.autocast(enabled=_C.train.amp):
             # Get image and text (tokens) from batch and pass through model.
@@ -167,31 +182,42 @@ def main(_A: argparse.Namespace):
         scaler.update()
         scheduler.step()
         timer.toc()
+        
+        # Log training statistics to wandb.
+        if (iteration == 1 or iteration % _A.log_period == 0) and dist.is_main_process():
+            wandb.log({'train/loss': loss.item()}, commit=False)
+            for name, _loss in output_dict["logging"].items():
+                wandb.log({f"train/{name}": _loss}, commit=False)
+            wandb.log({
+                'lr': scheduler.get_last_lr()[0],
+                'amp_scale': scaler.get_scale(),
+                },
+                      step=iteration,
+                )
 
-        # Log statistics to terminal and wandb.
+        # Log statistics to terminal.
         if iteration % _A.log_period == 0:
             timer_stats = (
                 f"Iter {timer.iteration} | Time (sec): {data_time:.3f} data, "
                 f"{timer.deltas[-1]:.3f} model | ETA: {timer.eta_hhmm}"
             )
-
             log_str = f"{timer_stats} [GPU {dist.gpu_mem_usage()} MB]"
             for key, value in output_dict["logging"].items():
                 log_str += f" [{key} {value:.3f}]"
-
             logger.info(log_str)
-
-            if dist.is_main_process():
-                wandb.log({'train/loss': loss.item()}, commit=False)
-                for name, _loss in output_dict["logging"].items():
-                    wandb.log({f"train/{name}": _loss}, commit=False)
-                wandb.log(
-                    {
-                        'lr': scheduler.get_last_lr()[0],
-                        'amp_scale': scaler.get_scale(),
-                        },
-                    step=iteration,
-                    )
+            
+        # Evaluate model performance on validation set.
+        if (iteration == 1 or iteration % _A.eval_period == 0) and dist.is_main_process():
+            logger.info(f'Evaluating on validation set...')
+            for eval_name, evaluator in evaluators.items():
+                results_dict = evaluator(model)
+                header = ",".join(results_dict.keys())
+                numbers = ",".join([f"{num:.1f}" for num in results_dict.values()])
+                logger.info(f"\n{header}\n{numbers}")
+                
+                for score_name, score in results_dict.items():
+                    wandb.log({f'{eval_name}/{score_name}': score}, commit=False)
+                wandb.log({}, step=iteration)
 
         # Save checkpoint to disk.
         if iteration % _A.checkpoint_period == 0 and dist.is_main_process():
