@@ -13,7 +13,7 @@ conda activate meru
 ```
 and with python/pip
 ```sh
-pip3 install torch torchvision tensorflow          
+pip3 install torch torchvision tensorflow wandb
 python -m pip install --pre timm
 python -m pip install -r requirements.txt
 python setup.py develop

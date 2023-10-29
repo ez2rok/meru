@@ -13,6 +13,7 @@ import random
 from pathlib import Path
 
 import torch
+import wandb
 import numpy as np
 from loguru import logger
 from omegaconf import OmegaConf
@@ -138,9 +139,13 @@ def main(_A: argparse.Namespace):
     dataloader_iter = iter(dataloader)
     timer = Timer(start_iteration + 1, total_iterations=_C.train.num_iterations)
 
-    # Create tensorboard writer, only in main process.
+    # Create wandb run, only in main process.
     if dist.is_main_process():
-        tboard = SummaryWriter(log_dir=_A.output_dir)
+        wandb.login()
+        wandb.init(
+            project='meru',
+            config=OmegaConf.to_container(_C, resolve=True),
+        )
 
     # -------------------------------------------------------------------------
     #   TRAINING LOOP
@@ -164,7 +169,7 @@ def main(_A: argparse.Namespace):
         scheduler.step()
         timer.toc()
 
-        # Log statistics to terminal and tensorboard.
+        # Log statistics to terminal and wandb.
         if iteration % _A.log_period == 0:
             timer_stats = (
                 f"Iter {timer.iteration} | Time (sec): {data_time:.3f} data, "
@@ -178,10 +183,16 @@ def main(_A: argparse.Namespace):
             logger.info(log_str)
 
             if dist.is_main_process():
-                tboard.add_scalar("lr", scheduler.get_last_lr()[0], iteration)
-                tboard.add_scalar("amp_scale", scaler.get_scale(), iteration)
+                wandb.log({'train/loss': loss.item()}, commit=False)
                 for name, _loss in output_dict["logging"].items():
-                    tboard.add_scalar(f"train/{name}", _loss, iteration)
+                    wandb.log({f"train/{name}": _loss}, commit=False)
+                wandb.log(
+                    {
+                        'lr': scheduler.get_last_lr()[0],
+                        'amp_scale': scaler.get_scale(),
+                        },
+                    step=iteration,
+                    )
 
         # Save checkpoint to disk.
         if iteration % _A.checkpoint_period == 0 and dist.is_main_process():
@@ -191,6 +202,8 @@ def main(_A: argparse.Namespace):
     if dist.is_main_process():
         checkpoint_manager.final_step()
 
+    # Close wandb run 
+    wandb.finish()
 
 if __name__ == "__main__":
     _A = parser.parse_args()
