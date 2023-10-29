@@ -139,7 +139,7 @@ class ZeroShotClassificationEvaluator:
             results_dict[dname] = accuracy
 
             logger.info(
-                f"Zero-shot evaluation: {dname}, {len(image_feats)} images, "
+                f"Zero-shot classification: {dname}, {len(image_feats)} images, "
                 f"{len(class_names)} classes [acc.: {accuracy:.1f}%] "
             )
 
