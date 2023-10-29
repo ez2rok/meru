@@ -220,7 +220,7 @@ class LinearProbeClassificationEvaluator:
                 f"val ({len(labels['val'])}), test ({len(labels['test'])})"
             )
 
-            acc_meter = MulticlassAccuracy(DatasetCatalog.NUM_CLASSES[dname])
+            acc_meter = MulticlassAccuracy(DatasetCatalog.NUM_CLASSES[dname]).to(model.device)
             # ----------------------------------------------------------------
             # Perform a hyperparameter sweep over cost values for logistic
             # regression using the validation set. We follow CLIP and perform
@@ -235,8 +235,8 @@ class LinearProbeClassificationEvaluator:
                 classifier = LogisticRegression(C=cost, **self._sk_kwargs)
                 classifier.fit(image_feats["train"], labels["train"])
 
-                predictions = classifier.predict_proba(image_feats["val"])
-                acc_meter(torch.as_tensor(predictions), labels["val"])
+                predictions = torch.as_tensor(classifier.predict_proba(image_feats["val"]))
+                acc_meter(predictions.to(model.device), labels["val"].to(model.device))
                 result = acc_meter.compute() * 100.0
                 logger.info(f"Cost = {cost:.6f}, Val acc = {result:.3f}")
 
@@ -266,8 +266,8 @@ class LinearProbeClassificationEvaluator:
                     classifier = LogisticRegression(C=cost, **self._sk_kwargs)
                     classifier.fit(image_feats["train"], labels["train"])
 
-                    predictions = classifier.predict_proba(image_feats["val"])
-                    acc_meter(torch.as_tensor(predictions), labels["val"])
+                    predictions = torch.as_tensor(classifier.predict_proba(image_feats["val"]))
+                    acc_meter(predictions.to(model.device), labels["val"].to(model.device))
                     result = acc_meter.compute() * 100.0
 
                     logger.info(f"Cost = {cost:.6f}, Val acc = {result:.3f}")
@@ -291,8 +291,8 @@ class LinearProbeClassificationEvaluator:
                 torch.cat([labels["train"], labels["val"]]),
             )
 
-            predictions = final_classifier.predict_proba(image_feats["test"])
-            acc_meter(torch.as_tensor(predictions), labels["test"])
+            predictions = torch.as_tensor(final_classifier.predict_proba(image_feats["test"]))
+            acc_meter(predictions.to(model.device), labels["test"].to(model.device))
             final_accuracy = acc_meter.compute() * 100.0
             logger.info(f"Evaluation done, {dname} test acc = {final_accuracy:.3f}")
 
