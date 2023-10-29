@@ -76,6 +76,7 @@ class ZeroShotClassificationEvaluator:
         results_dict = {}
 
         for dname, prompts in self._datasets_and_prompts.items():
+            logger.info(f"Zero-shot classification evaluation for {dname}:")
             # ----------------------------------------------------------------
             # Make zero-shot classifier using class name and prompts.
             # ----------------------------------------------------------------
