@@ -18,7 +18,6 @@ import numpy as np
 from loguru import logger
 from omegaconf import OmegaConf
 from torch.cuda import amp
-from torch.utils.tensorboard import SummaryWriter
 
 import meru.utils.distributed as dist
 from meru.config import LazyConfig, LazyFactory
@@ -46,7 +45,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--log-period", type=int, default=100,
-    help="Log to stdout/tensorboard periodically (only main process).",
+    help="Log to stdout/wandb periodically (only main process).",
 )
 parser.add_argument(
     "--num-machines", type=int, default=1,
