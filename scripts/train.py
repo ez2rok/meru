@@ -183,20 +183,8 @@ def main(_A: argparse.Namespace):
         scheduler.step()
         timer.toc()
         
-        # Log training statistics to wandb.
-        if (iteration == 1 or iteration % _A.log_period == 0) and dist.is_main_process():
-            wandb.log({'train/loss': loss.item()}, commit=False)
-            for name, _loss in output_dict["logging"].items():
-                wandb.log({f"train/{name}": _loss}, commit=False)
-            wandb.log({
-                'lr': scheduler.get_last_lr()[0],
-                'amp_scale': scaler.get_scale(),
-                },
-                      step=iteration,
-                )
-
-        # Log statistics to terminal.
-        if iteration % _A.log_period == 0:
+        # Log training statistics to terminal and wandb.
+        if iteration == 1 or iteration % _A.log_period == 0:
             timer_stats = (
                 f"Iter {timer.iteration} | Time (sec): {data_time:.3f} data, "
                 f"{timer.deltas[-1]:.3f} model | ETA: {timer.eta_hhmm}"
@@ -206,11 +194,23 @@ def main(_A: argparse.Namespace):
                 log_str += f" [{key} {value:.3f}]"
             logger.info(log_str)
             
-        # Evaluate model performance on validation set.
+            if dist.is_main_process():
+                wandb.log({'train/loss': loss.item()}, commit=False)
+                for name, _loss in output_dict["logging"].items():
+                    wandb.log({f"train/{name}": _loss}, commit=False)
+                wandb.log({
+                    'lr': scheduler.get_last_lr()[0],
+                    'amp_scale': scaler.get_scale(),
+                    },
+                        step=iteration,
+                    )
+            
+        # Log testing statistics to terminal and wandb.
         if (iteration == 1 or iteration % _A.eval_period == 0) and dist.is_main_process():
             logger.info(f'Evaluating on validation set...')
             for eval_name, evaluator in evaluators.items():
                 results_dict = evaluator(model)
+                
                 header = ",".join(results_dict.keys())
                 numbers = ",".join([f"{num:.1f}" for num in results_dict.values()])
                 logger.info(f"\n{header}\n{numbers}")
