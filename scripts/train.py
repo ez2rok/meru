@@ -136,7 +136,7 @@ def main(_A: argparse.Namespace):
     checkpoint_manager = CheckpointManager(
         _A.output_dir,
         model=model,
-        optimizer=optimizer,
+        # optimizer=optimizer, # https://github.com/pytorch/pytorch/issues/40769#issuecomment-651854015
         scheduler=scheduler,
         scaler=scaler,
     )
