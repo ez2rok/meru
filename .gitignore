@@ -48,3 +48,6 @@ output/
 
 # wandb stuff
 wandb/
+
+# jupter notebooks
+notebooks/
