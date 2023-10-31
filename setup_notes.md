@@ -70,5 +70,20 @@ How to get a symlink to work:
 
 To train, run the command:
 ```sh
-python scripts/train.py --log-period 5 --eval-period 10 --config configs/train_meru_vit_s.py --num-gpus 2 --output-dir ./output train.total_batch_size=128
+python scripts/train.py \
+   --config configs/train_meru_vit_s.py \
+   --num-gpus 2 \
+   train.total_batch_size=128
 ```
+
+To train the last layer, run the command:
+```sh
+python scripts/train.py \
+   --config configs/train_meru_vit_s.py \
+   --resume \
+   --proj-layer-only 64 \
+   --num-gpus 2 \
+   train.total_batch_size=2048 \
+   train.num_iterations=150000
+```
+Note: you can afford a larger batch size because you are training few parameters.
