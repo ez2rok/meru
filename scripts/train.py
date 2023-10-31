@@ -138,7 +138,7 @@ def main(_A: argparse.Namespace):
     scheduler = LazyFactory.build_lr_scheduler(_C, optimizer)
     scaler = amp.GradScaler(enabled=_C.train.amp)
     tokenizer = Tokenizer()
-
+    
     checkpoint_manager = CheckpointManager(
         _A.output_dir,
         model=model,
@@ -157,21 +157,14 @@ def main(_A: argparse.Namespace):
     # Create an iterator from dataloader to sample batches perpetually.
     dataloader_iter = iter(dataloader)
     train_timer = Timer(start_iteration + 1, total_iterations=_C.train.num_iterations)
-
-    # Create wandb run, only in main process.
-    if dist.is_main_process():
-        wandb.login()
-        wandb.init(
-            project='meru',
-            config=OmegaConf.to_container(_C, resolve=True),
-        )
+    
+    _model = model.module if isinstance(
+        model, torch.nn.parallel.distributed.DistributedDataParallel
+        ) else model
         
     # Freeze all layers except projection layer. Projection layer is initialized
     # with dimension specified by _A.proj_layer_only.
     if _A.proj_layer_only:
-        _model = model.module if isinstance(
-            model, torch.nn.parallel.distributed.DistributedDataParallel
-            ) else model
             
         # Freeze all params except for learnable params.
         learnable_params = set([
@@ -192,8 +185,19 @@ def main(_A: argparse.Namespace):
         _model.textual_proj = torch.nn.Linear(
             textual_out_dim, proj_dim, bias=False, device=model.device
             )
-        
         optimizer = LazyFactory.build_optimizer(_C, model)
+        
+    # Create wandb run, only in main process.
+    if dist.is_main_process():
+        model_name = _model.__class__.__name__.lower()
+        model_size = _C.model.visual.arch.split('_')[1]
+        proj_dim = str(_model.visual_proj.weight.shape[0]).zfill(4)
+        wandb.login()
+        wandb.init(
+            project='meru',
+            name=f'{model_name}-vit-{model_size}-{proj_dim}',
+            config=OmegaConf.to_container(_C, resolve=True),
+        )
     
     # -------------------------------------------------------------------------
     #   TRAINING LOOP
@@ -242,7 +246,7 @@ def main(_A: argparse.Namespace):
                         step=iteration,
                     )
             
-        # Log eval stats to terminal and wandb.
+        # Log eval stats to terminal and wandb (only in main process).
         if dist.is_main_process() and (
             iteration == start_iteration or iteration % _A.eval_period == 0
             ):
