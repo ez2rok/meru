@@ -156,7 +156,7 @@ def main(_A: argparse.Namespace):
 
     # Create an iterator from dataloader to sample batches perpetually.
     dataloader_iter = iter(dataloader)
-    timer = Timer(start_iteration + 1, total_iterations=_C.train.num_iterations)
+    train_timer = Timer(start_iteration + 1, total_iterations=_C.train.num_iterations)
 
     # Create wandb run, only in main process.
     if dist.is_main_process():
@@ -203,8 +203,8 @@ def main(_A: argparse.Namespace):
         batch = next(dataloader_iter)
         data_time = time.perf_counter() - data_time
 
-        timer.tic()
         model.train()
+        train_timer.tic()
         optimizer.zero_grad()
         with amp.autocast(enabled=_C.train.amp):
             # Get image and text (tokens) from batch and pass through model.
@@ -216,13 +216,13 @@ def main(_A: argparse.Namespace):
         scaler.step(optimizer)
         scaler.update()
         scheduler.step()
-        timer.toc()
+        train_timer.toc()
         
         # Log training stats to terminal and wandb.
         if iteration == start_iteration or iteration % _A.log_period == 0:
             timer_stats = (
-                f"Iter {timer.iteration} | Time (sec): {data_time:.3f} data, "
-                f"{timer.deltas[-1]:.3f} model | ETA: {timer.eta_hhmm}"
+                f"Iter {train_timer.iteration} | Time (sec): {data_time:.3f} data, "
+                f"{train_timer.deltas[-1]:.3f} model | ETA: {train_timer.eta_hhmm}"
             )
             log_str = f"{timer_stats} [GPU {dist.gpu_mem_usage()} MB]"
             log_str += "\n\t\t\t| "
@@ -242,19 +242,26 @@ def main(_A: argparse.Namespace):
                         step=iteration,
                     )
             
-        # Log test stats to terminal and wandb.
-        if (iteration == start_iteration or iteration % _A.eval_period == 0) and dist.is_main_process():
+        # Log eval stats to terminal and wandb.
+        if dist.is_main_process() and (
+            iteration == start_iteration or iteration % _A.eval_period == 0
+            ):
             logger.info(f'Evaluating on validation set...')
+            
+            eval_stats = {}
             for eval_name, evaluator in evaluators.items():
+                start_time = time.perf_counter()
                 results_dict = evaluator(model)
+                end_time = time.perf_counter()
                 
                 header = ",".join(results_dict.keys())
                 numbers = ",".join([f"{num:.1f}" for num in results_dict.values()])
                 logger.info(f"\n{header}\n{numbers}")
                 
                 for score_name, score in results_dict.items():
-                    wandb.log({f'{eval_name}/{score_name}': score}, commit=False)
-                wandb.log({}, step=iteration)
+                    eval_stats.update({f'{eval_name}/{score_name}': score})
+                eval_stats.update({f'{eval_name}/time': end_time - start_time})
+            wandb.log(eval_stats, step=iteration)
 
         # Save checkpoint to disk.
         if iteration % _A.checkpoint_period == 0 and dist.is_main_process():
