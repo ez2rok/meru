@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from collections import defaultdict
 from pathlib import Path
 from typing import Callable, Iterator
@@ -17,6 +18,7 @@ from PIL import Image
 from torch.utils.data import Dataset, IterDataPipe
 from torch.utils.data.datapipes.iter import ShardingFilter
 from torchvision.datasets import ImageFolder
+from loguru import logger
 
 
 class CocoCaptions(Dataset):
@@ -99,9 +101,20 @@ class Flickr30kCaptions(CocoCaptions):
         self.root = Path(root)
         self.split = split
         self.transform = transform
+        
+        json_path = self.root / "dataset_flickr30k.json"
+        images_dir = self.root / "flickr30k_images"
+        
+        # Download the data if not already downloaded.
+        if not json_path.is_file() or not images_dir.is_dir():
+            logger.info("Downloading Flickr30K dataset (ETA ~7 minutes)...")
+            cmd = ["chmod 777 ./meru/data/download_flickr30k.sh ",
+                   "&& ./meru/data/download_flickr30k.sh"]
+            out = subprocess.run(''.join(cmd), shell=True, check=True)
+            logger.info("Finished downloading Flickr30K dataset.")
 
         # Read annotations and keep only those belonging to specified split.
-        flickr_json = json.load(open(self.root / "dataset_flickr30k.json"))
+        flickr_json = json.load(open(json_path))
 
         # Convert the filtered list of tuples formatted as:
         # `(image_id, image_path, list[caption_ids], list[caption])`.
@@ -109,7 +122,7 @@ class Flickr30kCaptions(CocoCaptions):
         self.samples = [
             (
                 int(ann["filename"][:-4]),
-                self.root / "flickr30k_images" / ann["filename"],
+                images_dir / ann["filename"],
                 ann["sentids"],
                 [entry["raw"] for entry in ann["sentences"]],
             )
