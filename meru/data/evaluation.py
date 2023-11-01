@@ -40,9 +40,19 @@ class CocoCaptions(Dataset):
         self.root = Path(root)
         self.split = split
         self.transform = transform
+        
+        json_path = self.root / "annotations" / f"captions_{split}2017.json"
+        image_dir = self.root / f"{split}2017"
+        
+        # Download the data if not already downloaded.
+        if not json_path.is_file() or not image_dir.is_dir():
+            logger.info("Downloading Coco dataset (ETA ~10 minutes)...")
+            cmd = ["chmod 777 ./meru/data/download_coco.sh ",
+                   "&& ./meru/data/download_coco.sh"]
+            out = subprocess.run(''.join(cmd), shell=True, check=True)
+            logger.info("Finished downloading Coco dataset.")
 
         # Read annotations for the given split.
-        json_path = self.root / "annotations" / f"captions_{split}2017.json"
         coco_json = json.load(open(json_path))
 
         # Build a temporary mapping between image ID and captions.
@@ -55,7 +65,7 @@ class CocoCaptions(Dataset):
         self.samples = [
             (
                 image_id,
-                self.root / f"{split}2017" / f"{image_id:0>12d}.jpg",
+                image_dir / f"{image_id:0>12d}.jpg",
                 [ann["id"] for ann in anns],
                 [ann["caption"] for ann in anns],
             )
@@ -103,10 +113,10 @@ class Flickr30kCaptions(CocoCaptions):
         self.transform = transform
         
         json_path = self.root / "dataset_flickr30k.json"
-        images_dir = self.root / "flickr30k_images"
+        image_dir = self.root / "flickr30k_images"
         
         # Download the data if not already downloaded.
-        if not json_path.is_file() or not images_dir.is_dir():
+        if not json_path.is_file() or not image_dir.is_dir():
             logger.info("Downloading Flickr30K dataset (ETA ~7 minutes)...")
             cmd = ["chmod 777 ./meru/data/download_flickr30k.sh ",
                    "&& ./meru/data/download_flickr30k.sh"]
@@ -122,7 +132,7 @@ class Flickr30kCaptions(CocoCaptions):
         self.samples = [
             (
                 int(ann["filename"][:-4]),
-                images_dir / ann["filename"],
+                image_dir / ann["filename"],
                 ann["sentids"],
                 [entry["raw"] for entry in ann["sentences"]],
             )
