@@ -9,8 +9,7 @@ from meru.evaluation.retrieval import ZeroShotRetrievalEvaluator
 
 
 evaluator = L(ZeroShotRetrievalEvaluator)(
-    # datasets=["coco", "flickr30k"],
-    datasets=["flickr30k"],
+    datasets=["coco", "flickr30k"],
     data_dir="datasets",
     image_size=224,
 )
