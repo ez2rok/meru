@@ -85,4 +85,3 @@ python scripts/train.py \
    --num-gpus 2 \
    train.num_iterations=150000
 ```
-Note: you can afford a larger batch size because you are training few parameters.
