@@ -135,18 +135,24 @@ class CheckpointManager:
             )
             return 0
 
-    def load(self, path: str | Path) -> int:
+    # @property
+    def load(self, path: str | Path, **checkpointables) -> int:
         """
         Load a saved checkpoint from a given file path. This method tries to find
         each of :attr:`checkpointables` in the file and load their state dict.
 
         Args:
             path: Path to a directory/checkpoint saved by :meth:`step`.
+            checkpointables: Keyword arguments with any checkpointable objects, for
+                example: model, optimizer, LR scheduler, AMP gradient scaler.
 
         Returns:
             Iteration corresponding to the loaded checkpoint (to resume training).
             If iteration is not found in file, this method will return -1.
         """
+        
+        if checkpointables is None:
+            checkpointables = self.checkpointables
 
         # Each process will log a message after loading checkpoint.
         rank = dist.get_rank()
@@ -156,17 +162,17 @@ class CheckpointManager:
         iteration = checkpoint.pop("iteration", -1)
 
         # Keep flags of all checkpointables to lo which ones were not loaded.
-        is_loaded = {key: False for key in self.checkpointables}
+        is_loaded = {key: False for key in checkpointables}
 
         # Load each checkpointable from checkpoint.
         for key in checkpoint:
-            if key in self.checkpointables:
+            if key in checkpointables:
                 logger.info(f"Rank {rank}: Loading {key} from {path}")
 
-                if isinstance(self.checkpointables[key], DistributedDataParallel):
-                    self.checkpointables[key].module.load_state_dict(checkpoint[key])
+                if isinstance(checkpointables[key], DistributedDataParallel):
+                    checkpointables[key].module.load_state_dict(checkpoint[key])
                 else:
-                    self.checkpointables[key].load_state_dict(checkpoint[key])
+                    checkpointables[key].load_state_dict(checkpoint[key])
 
                 is_loaded[key] = True
             else:
