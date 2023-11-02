@@ -279,7 +279,7 @@ def main(_A: argparse.Namespace):
     if dist.is_main_process():
         checkpoint_manager.final_step()
         if _A.save:
-            path = Path('models') / run_name.replace('-', '_')
+            path = Path('checkpoints') / run_name.replace('-', '_') + 'pth'
             checkpoint_manager.save(path)
 
     # Close wandb run.
