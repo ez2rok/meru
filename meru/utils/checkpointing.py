@@ -92,6 +92,17 @@ class CheckpointManager:
         does not update `last_checkpoint.txt` or delete the oldest checkpoint.
         """
 
+        save_path = self.output_dir / f"checkpoint_final.pth"
+        self.save(save_path)
+        
+    def save(self, save_path):
+        """
+        Save all checkpointable items to path.
+        
+        Args:
+            save_path: Path to save checkpoint.
+        """
+        
         out_state_dict = {}
         for key in self.checkpointables:
             if isinstance(self.checkpointables[key], DistributedDataParallel):
@@ -100,7 +111,8 @@ class CheckpointManager:
                 out_state_dict[key] = self.checkpointables[key].state_dict()
 
         # Save checkpoint corresponding to current iteration.
-        torch.save(out_state_dict, self.output_dir / f"checkpoint_final.pth")
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(out_state_dict, save_path)
 
     def resume(self) -> int:
         """

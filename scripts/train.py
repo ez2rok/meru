@@ -82,6 +82,10 @@ parser.add_argument(
 parser.add_argument(
     "overrides", nargs="...", default=[], help="Config overrides (key-value pairs)."
 )
+parser.add_argument(
+    "--save", action="store_true",
+    help="Whether to save the model after training."
+)
 # fmt: on
 
 
@@ -192,10 +196,10 @@ def main(_A: argparse.Namespace):
         model_name = _model.__class__.__name__.lower()
         model_size = _C.model.visual.arch.split('_')[1]
         proj_dim = str(_model.visual_proj.weight.shape[0]).zfill(4)
+        run_name = f'{model_name}-vit-{model_size}-{proj_dim}'
         wandb.login()
         wandb.init(
-            project='meru',
-            name=f'{model_name}-vit-{model_size}-{proj_dim}',
+            project='meru', name=run_name,
             config=OmegaConf.to_container(_C, resolve=True),
         )
     
@@ -274,6 +278,9 @@ def main(_A: argparse.Namespace):
     # Save the final checkpoint.
     if dist.is_main_process():
         checkpoint_manager.final_step()
+        if _A.save:
+            path = Path('models') / run_name.replace('-', '_')
+            checkpoint_manager.save(path)
 
     # Close wandb run.
     wandb.finish()
