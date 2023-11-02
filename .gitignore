@@ -51,3 +51,6 @@ wandb/
 
 # jupter notebooks
 notebooks/
+
+# saved models
+models/
