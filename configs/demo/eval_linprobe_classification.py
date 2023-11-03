@@ -10,9 +10,9 @@ from meru.evaluation.classification import LinearProbeClassificationEvaluator
 
 evaluator = L(LinearProbeClassificationEvaluator)(
     datasets=[
-        "cifar100",
+        "country211",
     ],
     data_dir="datasets/eval",
     image_size=224,
-    num_workers=0,
+    num_workers=2,
 )
