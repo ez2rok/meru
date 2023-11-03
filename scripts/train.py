@@ -19,6 +19,7 @@ from loguru import logger
 from omegaconf import OmegaConf
 from hydra.utils import instantiate
 from torch.cuda import amp
+from torch.nn.parallel import DistributedDataParallel
 
 import meru.utils.distributed as dist
 from meru.config import LazyConfig, LazyFactory
@@ -28,6 +29,7 @@ from meru.utils.timer import Timer
 from configs.test.linprobe_classification import evaluator as linprobe_clf_evaluator
 from configs.test.zero_shot_classification import evaluator as zeroshot_clf_evaluator
 from configs.test.zero_shot_retrieval import evaluator as zeroshot_retrieval_evaluator
+from meru.utils.compare import compare_models
 
 
 # fmt: off
@@ -152,6 +154,10 @@ def main(_A: argparse.Namespace):
     )
     start_iteration = checkpoint_manager.resume() if _A.resume else 0
     
+    # Copy original model for evaluation.
+    import copy
+    original_model = copy.deepcopy(model)
+    
     evaluators = {
         # "zero_shot_classification": instantiate(zeroshot_clf_evaluator),
         "zero_shot_retrieval": instantiate(zeroshot_retrieval_evaluator),
@@ -160,14 +166,17 @@ def main(_A: argparse.Namespace):
 
     # Create an iterator from dataloader to sample batches perpetually.
     dataloader_iter = iter(dataloader)
-    train_timer = Timer(start_iteration + 1, total_iterations=_C.train.num_iterations)
+    train_timer = Timer(
+        start_iteration + 1, total_iterations=_C.train.num_iterations
+        )
     
+    # Use internal `module` for DDP.
     _model = model.module if isinstance(
-        model, torch.nn.parallel.distributed.DistributedDataParallel
+        model, DistributedDataParallel
         ) else model
         
-    # Freeze all layers except projection layer. Projection layer is initialized
-    # with dimension specified by _A.proj_layer_only.
+    # Freeze all layers except projection layer. Projection layer is
+    # initialized with dimension specified by _A.proj_layer_only.
     if _A.proj_layer_only:
             
         # Freeze all params except for learnable params.
@@ -189,7 +198,10 @@ def main(_A: argparse.Namespace):
         _model.textual_proj = torch.nn.Linear(
             textual_out_dim, proj_dim, bias=False, device=model.device
             )
-        optimizer = LazyFactory.build_optimizer(_C, model)
+        model.module = _model # is this needed?
+        optimizer = LazyFactory.build_optimizer(_C, _model)
+        
+    assert compare_models(original_model, model), "Model has changed."
         
     # Create wandb run, only in main process.
     if dist.is_main_process():
@@ -225,9 +237,9 @@ def main(_A: argparse.Namespace):
         scaler.update()
         scheduler.step()
         train_timer.toc()
-        
+                
         # Log training stats to terminal and wandb.
-        if iteration == start_iteration or iteration % _A.log_period == 0:
+        if iteration == start_iteration + 1 or iteration % _A.log_period == 0:
             timer_stats = (
                 f"Iter {train_timer.iteration} | Time (sec): {data_time:.3f} data, "
                 f"{train_timer.deltas[-1]:.3f} model | ETA: {train_timer.eta_hhmm}"
@@ -252,9 +264,12 @@ def main(_A: argparse.Namespace):
             
         # Log eval stats to terminal and wandb (only in main process).
         if dist.is_main_process() and (
-            iteration == start_iteration or iteration % _A.eval_period == 0
+            iteration == start_iteration + 1 or iteration % _A.eval_period == 0
             ):
             logger.info(f'Evaluating on validation set...')
+            
+            # Ensure only correct layers changed.
+            assert compare_models(original_model, model), "Model has changed."
             
             eval_stats = {}
             for eval_name, evaluator in evaluators.items():
@@ -279,7 +294,8 @@ def main(_A: argparse.Namespace):
     if dist.is_main_process():
         checkpoint_manager.final_step()
         if _A.save:
-            path = Path('checkpoints') / run_name.replace('-', '_') + 'pth'
+            run_name = run_name.replace('-', '_')
+            path = Path('checkpoints') / f'{run_name}.pth'
             checkpoint_manager.save(path)
 
     # Close wandb run.
