@@ -135,7 +135,6 @@ class CheckpointManager:
             )
             return 0
 
-    # @property
     def load(self, path: str | Path, **checkpointables) -> int:
         """
         Load a saved checkpoint from a given file path. This method tries to find
@@ -151,7 +150,9 @@ class CheckpointManager:
             If iteration is not found in file, this method will return -1.
         """
         
-        if checkpointables is None:
+        # If no checkpointables are provided, load checkpointables from
+        # self.checkpointables.
+        if isinstance(checkpointables, dict) and len(checkpointables) == 0:
             checkpointables = self.checkpointables
 
         # Each process will log a message after loading checkpoint.
