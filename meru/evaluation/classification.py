@@ -162,6 +162,7 @@ class LinearProbeClassificationEvaluator:
         data_dir: str | Path,
         num_workers: int = 4,
         image_size: int = 224,
+        tune_hyperparams: bool = False,
     ):
         """
         Args:
@@ -174,10 +175,13 @@ class LinearProbeClassificationEvaluator:
             image_size: Resize and crop images to this size for evaluation. We
                 resize the smaller image edge (keeping aspect ratio same) using
                 bicubic interpolation, and take a square center crop.
+            tune_hyperparams: If True, perform a hyperparameter sweep over cost
+                values for logistic regression using the validation set.
         """
         self._datasets = datasets
         self._data_dir = Path(data_dir).resolve()
         self._num_workers = num_workers
+        self.tune_hyperparams = tune_hyperparams
 
         self._image_transform = T.Compose(
             [
@@ -194,6 +198,7 @@ class LinearProbeClassificationEvaluator:
         # representations directly from the image encoder, regardless of model type.
         model = model.eval()
         model.visual_proj = torch.nn.Identity()
+        device = model.device
 
         # Collect results per task in this dict:
         results_dict = {}
@@ -204,10 +209,12 @@ class LinearProbeClassificationEvaluator:
             # Extract image features and labels from [train, val, test] splits.
             image_feats, labels = {}, {}
             for split in ["train", "val", "test"]:
-                loader = DataLoader(
-                    DatasetCatalog.build(
+                dataset, sampler = DatasetCatalog.build(
                         dname, self._data_dir, split, self._image_transform
-                    ),
+                    )
+                loader = DataLoader(
+                    dataset,
+                    sampler=sampler,
                     batch_size=64, # lowered from 128 to fit in memory
                     num_workers=self._num_workers,
                 )
@@ -220,79 +227,22 @@ class LinearProbeClassificationEvaluator:
                 f"val ({len(labels['val'])}), test ({len(labels['test'])})"
             )
 
-            acc_meter = MulticlassAccuracy(DatasetCatalog.NUM_CLASSES[dname]).to(model.device)
-            # ----------------------------------------------------------------
-            # Perform a hyperparameter sweep over cost values for logistic
-            # regression using the validation set. We follow CLIP and perform
-            # a parametric binary search in two passes.
-            # ----------------------------------------------------------------
-            costs = [1e-6, 1e-4, 1e-2, 1, 1e2, 1e4, 1e6]
-            logger.info(f"First pass: searching best cost among {costs}...")
-
-            best_cost, best_result = -1, -1
-
-            for cost in costs:
-                classifier = LogisticRegression(C=cost, **self._sk_kwargs)
-                classifier.fit(image_feats["train"], labels["train"])
-
-                predictions = torch.as_tensor(classifier.predict_proba(image_feats["val"]))
-                acc_meter(predictions.to(model.device), labels["val"].to(model.device))
-                result = acc_meter.compute() * 100.0
-                logger.info(f"Cost = {cost:.6f}, Val acc = {result:.3f}")
-
-                # Update best searched cost so far.
-                if result > best_result:
-                    best_cost, best_result = cost, result
-
-                # Reset accuracy meter for next iteration.
-                acc_meter.reset()
-
-            logger.info(f"Best cost from first sweep: {best_cost:.6f}")
-            logger.info(f"Second pass: perform binary search around best cost...")
-
-            # Interval width around peak cost value from first sweep. For example,
-            # if the best cost is 1000, then interval will be [100, 10000]
-            delta = 10.0
-
-            for step in range(1, 5):
-                # Check accuracies on the extremes of left-half and right-half
-                # interval around the current best cost.
-                lc, rc = best_cost / delta, best_cost * delta
-                logger.info(
-                    f"Search step {step}, costs [left = {lc:.6f}, right = {rc:.6f}]"
-                )
-
-                for cost in [lc, rc]:
-                    classifier = LogisticRegression(C=cost, **self._sk_kwargs)
-                    classifier.fit(image_feats["train"], labels["train"])
-
-                    predictions = torch.as_tensor(classifier.predict_proba(image_feats["val"]))
-                    acc_meter(predictions.to(model.device), labels["val"].to(model.device))
-                    result = acc_meter.compute() * 100.0
-
-                    logger.info(f"Cost = {cost:.6f}, Val acc = {result:.3f}")
-
-                    # Update best searched cost so far.
-                    if result > best_result:
-                        best_cost, best_result = cost, result
-
-                    # Reset accuracy meter for next iteration.
-                    acc_meter.reset()
-
-                # Half the search interval in log-space, for next search step.
-                delta = delta**0.5
-
-            logger.info(f"Best cost = {best_cost:.6f}, Val acc = {best_result:.3f}")
+            acc_meter = MulticlassAccuracy(DatasetCatalog.NUM_CLASSES[dname]).to(device)
+            best_cost = 1.0
+            
+            # Find best cost value for logistic regression using validation set.
+            if self.tune_hyperparams:
+                best_cost = _get_best_cost(image_feats, labels, device, self._sk_kwargs, acc_meter)
+        
+            # Train a classifier on (train+val) split with best cost.
             logger.info(f"Training classifier on (train+val) split with best cost.")
-
             final_classifier = LogisticRegression(C=best_cost, **self._sk_kwargs)
             final_classifier.fit(
                 torch.cat([image_feats["train"], image_feats["val"]]),
                 torch.cat([labels["train"], labels["val"]]),
             )
-
             predictions = torch.as_tensor(final_classifier.predict_proba(image_feats["test"]))
-            acc_meter(predictions.to(model.device), labels["test"].to(model.device))
+            acc_meter(predictions.to(device), labels["test"].to(device))
             final_accuracy = acc_meter.compute() * 100.0
             logger.info(f"Evaluation done, {dname} test acc = {final_accuracy:.3f}")
 
@@ -327,3 +277,86 @@ def _encode_dataset(
         all_labels.append(labels)
 
     return torch.cat(all_image_feats, dim=0), torch.cat(all_labels, dim=0)
+
+
+def _get_best_cost(
+    image_feats: dict[str, torch.Tensor],
+    labels: dict[str, torch.Tensor],
+    device: torch.device,
+    _sk_kwargs: dict[str, int],
+    acc_meter: MulticlassAccuracy,
+) -> float:
+    """
+    Perform a hyperparameter sweep over cost values for logistic
+    regression using the validation set to get the best cost. We follow CLIP and
+    perform a parametric binary search in two passes.
+    
+    Args:
+        image_feats: Tensor of shape (num_instances, embed_dim) containing
+            image features extracted from the model.
+        labels: Tensor of shape (num_instances,) containing integer labels.
+        device: Device to move tensors to.
+        _sk_kwargs: Keyword arguments for
+        `sklearn.linear_model.LogisticRegression`.
+        acc_meter: Torchmetrics accuracy meter to compute accuracy.
+        
+    """
+   
+    costs = [1e-6, 1e-4, 1e-2, 1, 1e2, 1e4, 1e6]
+    logger.info(f"First pass: searching best cost among {costs}...")
+
+    best_cost, best_result = -1, -1
+
+    for cost in costs:
+        classifier = LogisticRegression(C=cost, **_sk_kwargs)
+        classifier.fit(image_feats["train"], labels["train"])
+
+        predictions = torch.as_tensor(classifier.predict_proba(image_feats["val"]))
+        acc_meter(predictions.to(device), labels["val"].to(device))
+        result = acc_meter.compute() * 100.0
+        logger.info(f"Cost = {cost:.6f}, Val acc = {result:.3f}")
+
+        # Update best searched cost so far.
+        if result > best_result:
+            best_cost, best_result = cost, result
+
+        # Reset accuracy meter for next iteration.
+        acc_meter.reset()
+
+    logger.info(f"Best cost from first sweep: {best_cost:.6f}")
+    logger.info(f"Second pass: perform binary search around best cost...")
+
+    # Interval width around peak cost value from first sweep. For example,
+    # if the best cost is 1000, then interval will be [100, 10000]
+    delta = 10.0
+
+    for step in range(1, 5):
+        # Check accuracies on the extremes of left-half and right-half
+        # interval around the current best cost.
+        lc, rc = best_cost / delta, best_cost * delta
+        logger.info(
+            f"Search step {step}, costs [left = {lc:.6f}, right = {rc:.6f}]"
+        )
+
+        for cost in [lc, rc]:
+            classifier = LogisticRegression(C=cost, **_sk_kwargs)
+            classifier.fit(image_feats["train"], labels["train"])
+
+            predictions = torch.as_tensor(classifier.predict_proba(image_feats["val"]))
+            acc_meter(predictions.to(device), labels["val"].to(device))
+            result = acc_meter.compute() * 100.0
+
+            logger.info(f"Cost = {cost:.6f}, Val acc = {result:.3f}")
+
+            # Update best searched cost so far.
+            if result > best_result:
+                best_cost, best_result = cost, result
+
+            # Reset accuracy meter for next iteration.
+            acc_meter.reset()
+
+        # Half the search interval in log-space, for next search step.
+        delta = delta**0.5
+
+    logger.info(f"Best cost = {best_cost:.6f}, Val acc = {best_result:.3f}")
+    return best_cost
