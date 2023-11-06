@@ -10,7 +10,7 @@ from meru.evaluation.classification import LinearProbeClassificationEvaluator
 
 evaluator = L(LinearProbeClassificationEvaluator)(
     datasets=[
-        "country211",
+        "food101",
     ],
     data_dir="datasets/eval",
     image_size=224,
