@@ -124,11 +124,7 @@ def main(_A: argparse.Namespace):
     # Print process info, config and args.
     logger.info(f"Rank of current process: {RANK}. World size: {WORLD_SIZE}")
     logger.info(f"RANK {RANK} using random seed: {_C.train.seed + RANK}")
-    if _A.proj_layer_only:
-        original_embed_dim, _C.model.embed_dim = _C.model.embed_dim, _A.proj_layer_only
     logger.info(OmegaConf.to_yaml(_C))
-    if _A.proj_layer_only:
-        _C.model.embed_dim = original_embed_dim
 
     logger.info("Command line args:")
     for arg in vars(_A):
@@ -165,7 +161,7 @@ def main(_A: argparse.Namespace):
     evaluators = {
         # "zero_shot_classification": instantiate(zeroshot_clf_evaluator),
         "zero_shot_retrieval": instantiate(zeroshot_retrieval_evaluator),
-        # "linear_probe_classification": instantiate(linprobe_clf_evaluator),
+        "linear_probe_classification": instantiate(linprobe_clf_evaluator),
     }
 
     # Create an iterator from dataloader to sample batches perpetually.
