@@ -85,7 +85,7 @@ parser.add_argument(
     "overrides", nargs="...", default=[], help="Config overrides (key-value pairs)."
 )
 parser.add_argument(
-    "--save", action="store_true",
+    "--save-model", action="store_true",
     help="Whether to save the model after training."
 )
 # fmt: on
@@ -124,7 +124,11 @@ def main(_A: argparse.Namespace):
     # Print process info, config and args.
     logger.info(f"Rank of current process: {RANK}. World size: {WORLD_SIZE}")
     logger.info(f"RANK {RANK} using random seed: {_C.train.seed + RANK}")
+    if _A.proj_layer_only:
+        original_embed_dim, _C.model.embed_dim = _C.model.embed_dim, _A.proj_layer_only
     logger.info(OmegaConf.to_yaml(_C))
+    if _A.proj_layer_only:
+        _C.model.embed_dim = original_embed_dim
 
     logger.info("Command line args:")
     for arg in vars(_A):
@@ -188,15 +192,15 @@ def main(_A: argparse.Namespace):
             param.requires_grad = name in learnable_params
 
         # Initialize new projection layers.
-        proj_dim = _A.proj_layer_only
+        new_embd_dim = _A.proj_layer_only
         visual_out_dim = _model.visual_proj.weight.shape[1]
         textual_out_dim = _model.textual_proj.weight.shape[1]
                
         _model.visual_proj = torch.nn.Linear(
-            visual_out_dim, proj_dim, bias=False, device=model.device
+            visual_out_dim, new_embd_dim, bias=False, device=model.device
             )
         _model.textual_proj = torch.nn.Linear(
-            textual_out_dim, proj_dim, bias=False, device=model.device
+            textual_out_dim, new_embd_dim, bias=False, device=model.device
             )
         model.module = _model # is this needed?
         optimizer = LazyFactory.build_optimizer(_C, _model)
@@ -207,8 +211,10 @@ def main(_A: argparse.Namespace):
     if dist.is_main_process():
         model_name = _model.__class__.__name__.lower()
         model_size = _C.model.visual.arch.split('_')[1]
-        proj_dim = str(_model.visual_proj.weight.shape[0]).zfill(4)
-        run_name = f'{model_name}-vit-{model_size}-{proj_dim}'
+        embd_dim = str(_model.visual_proj.weight.shape[0]).zfill(4)
+        run_name = f'{model_name}-vit-{model_size}-{embd_dim}'
+        _C.model.embed_dim = embd_dim
+        
         wandb.login()
         wandb.init(
             project='meru', name=run_name,
@@ -293,10 +299,17 @@ def main(_A: argparse.Namespace):
     # Save the final checkpoint.
     if dist.is_main_process():
         checkpoint_manager.final_step()
-        if _A.save:
+        
+        if _A.save_model:
             run_name = run_name.replace('-', '_')
-            path = Path('checkpoints') / f'{run_name}.pth'
-            checkpoint_manager.save(path)
+            path = Path('models') / f'{run_name}.pth'
+            path.parent.mkdir(parents=True, exist_ok=True)
+            
+            if isinstance(model, DistributedDataParallel):
+                model_state_dict = model.module.state_dict()
+            else:
+                model_state_dict = model.state_dict()
+            torch.save(model_state_dict, path)
 
     # Close wandb run.
     wandb.finish()
