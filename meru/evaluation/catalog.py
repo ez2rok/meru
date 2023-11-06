@@ -10,7 +10,10 @@ from functools import partial
 from pathlib import Path
 from typing import Callable
 
-from torchvision.datasets import Country211, FGVCAircraft, RenderedSST2
+import numpy as np
+from sklearn.model_selection import train_test_split
+from torch.utils.data.sampler import SubsetRandomSampler
+from torchvision.datasets import Country211, FGVCAircraft, RenderedSST2, Food101
 
 import meru.data.evaluation as DE
 
@@ -29,7 +32,8 @@ class DatasetCatalog:
         #
         # Datasets for image classification evaluation:
         "imagenet": DE.ImageNet,
-        "food101": partial(DE.TfdsWrapper, name="food101"),
+        # "food101": partial(DE.TfdsWrapper, name="food101"),
+        "food101": partial(Food101, download=True),
         "cifar10": partial(DE.TfdsWrapper, name="cifar10"),
         "cifar100": partial(DE.TfdsWrapper, name="cifar100"),
         "cub2011": partial(DE.TfdsWrapper, name="caltech_birds2011"),
@@ -61,7 +65,8 @@ class DatasetCatalog:
         #
         # Datasets for image classification evaluation:
         "imagenet": ["train", "", "val"],
-        "food101": ["train[:90%]", "train[90%:]", "validation"],
+        # "food101": ["train[:90%]", "train[90%:]", "validation"],
+        "food101": ["train", "train", "test"],
         "cifar10": ["train[:90%]", "train[90%:]", "test"],
         "cifar100": ["train[:90%]", "train[90%:]", "test"],
         "cub2011": ["train[:80%]", "train[80%:]", "test"],
@@ -113,11 +118,28 @@ class DatasetCatalog:
 
         # Change the root directory for some Torchvision datasets because their
         # auto-download location may clutter the dataset directory.
-        if name in ["aircraft", "country211", "imagenet", "sst2", "coco", "flickr30k"]:
+        if name in ["aircraft", "country211", "imagenet", "sst2", "coco", "flickr30k", "food101"]:
             root = str(Path(root) / name)
 
         # Map split from [train, val, test] to official name.
         _idx = ["train", "val", "test"].index(split)
-        split = cls.SPLITS[name][_idx]
+        official_split = cls.SPLITS[name][_idx]
+        
+        # Construct the dataset.
+        dataset = cls.CONSTRUCTORS[name](root=root, split=official_split, transform=transform)
+        
+        # Construct a stratified sampler.
+        # Adapted from https://stackoverflow.com/a/50544887/14773537.
+        sampler = None
+        if split in ["train", "val"] and name in ["food101"]: 
+            indices = list(range(len(dataset)))
+            train_split, val_split, _, _ = train_test_split(
+                indices,
+                dataset._labels,
+                stratify=dataset._labels,
+                test_size=0.1,
+                random_state=42,
+            )
+            sampler = SubsetRandomSampler(train_split if split == "train" else val_split)
 
-        return cls.CONSTRUCTORS[name](root=root, split=split, transform=transform)
+        return dataset, sampler
