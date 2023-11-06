@@ -66,7 +66,7 @@ class ZeroShotRetrievalEvaluator:
 
         for dname in self._datasets:
             logger.info(f"Zero-shot retrieval evaluation for {dname}:")
-            data_loader = DatasetCatalog.build(
+            data_loader, _ = DatasetCatalog.build(
                 dname, self._data_dir, "test", image_transform
             )
 
