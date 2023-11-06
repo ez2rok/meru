@@ -19,12 +19,14 @@ python -m pip install -r requirements.txt
 python setup.py develop
 ```
 
-Download the large meru and clip models
+Download the small and large meru and clip models
 ```sh
+wget https://dl.fbaipublicfiles.com/meru/meru_vit_s.pth -P checkpoints
+wget https://dl.fbaipublicfiles.com/meru/clip_vit_s.pth -P checkpoints
 wget https://dl.fbaipublicfiles.com/meru/meru_vit_l.pth -P checkpoints
 wget https://dl.fbaipublicfiles.com/meru/clip_vit_l.pth -P checkpoints
 ```
-It will take ~5 minutes to download each model.
+It will take ~1, ~5 minutes to download the small, large models respectivally.
 
 ## The Basics
 
@@ -81,10 +83,11 @@ python scripts/train.py \
 To finetune the last layer with a new dimension of 64, run the command:
 ```sh
 python scripts/train.py \
-   --config configs/train_meru_vit_l.py \
+   --config configs/train_meru_vit_s.py \
    --resume \
    --proj-layer-only 64 \
    --num-gpus 2 \
    --save \
-   train.num_iterations=150000
+   --output-dir ./output/
+   train.num_iterations=125000
 ```
