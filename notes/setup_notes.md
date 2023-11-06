@@ -36,19 +36,19 @@ Now let's try several commands.
    
 ```sh
 python scripts/image_traversals.py --image-path assets/taj_mahal.jpg \
-    --checkpoint-path checkpoints/meru_vit_l.pth --train-config configs/train_meru_vit_l.py
+    --checkpoint-path checkpoints/meru_vit_s.pth --train-config configs/train_meru_vit_s.py
 ```
 
 2. Zero-shot image classification
    ```sh
-   python scripts/evaluate.py --config configs/demo/eval_zero_shot_classification.py \
-    --checkpoint-path checkpoints/meru_vit_l.pth \
-    --train-config configs/train_meru_vit_l.py
+   python scripts/evaluate.py --config configs/demo/zero_shot_classification.py \
+    --checkpoint-path checkpoints/meru_vit_s.pth \
+    --train-config configs/train_meru_vit_s.py
    ```
 
 3. Linear probe classification
    ```sh
-   python scripts/evaluate.py --config configs/demo/eval_linprobe_classification.py \
+   python scripts/evaluate.py --config configs/demo/linprobe_classification.py \
     --checkpoint-path checkpoints/meru_vit_l.pth \
     --train-config configs/train_meru_vit_l.py 
     ```
@@ -62,7 +62,7 @@ python scripts/image_traversals.py --image-path assets/taj_mahal.jpg \
    ```
    and run the retrieval script
    ```sh
-   python scripts/evaluate.py --config configs/demo/eval_zero_shot_retrieval.py \
+   python scripts/evaluate.py --config configs/demo/zero_shot_retrieval.py \
     --checkpoint-path checkpoints/meru_vit_l.pth \
     --train-config configs/train_meru_vit_l.py
    ```
