@@ -11,6 +11,7 @@ from pathlib import Path
 
 import torch
 import torchvision.transforms as T
+from torch.nn.parallel import DistributedDataParallel
 from tqdm import tqdm
 from loguru import logger
 
@@ -187,7 +188,7 @@ def _encode_dataset(
         
         # check if model is an instance of torh DistributedDataParallel
         # https://github.com/huggingface/transformers/issues/18974#issuecomment-1242985539
-        if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+        if isinstance(model, DistributedDataParallel):
             model = model.module
         
         image_feats = model.encode_image(
