@@ -135,8 +135,8 @@ def evaluate_model(
         
         # Collect results in all_eval_results for logging to wandb.
         for score_name, score in eval_results.items():
-            all_eval_results.update({f'{eval_name}/{score_name}': score})
-        all_eval_results.update({f'{eval_name}/time': end_time - start_time})
+            all_eval_results.update({f'test/{eval_name}/{score_name}': score})
+        all_eval_results.update({f'test/{eval_name}/time': end_time - start_time})
     return all_eval_results
 
 
@@ -166,7 +166,6 @@ def get_train_results(output_dict, scheduler, scaler):
             train_results.update({f"train/{name}": _loss})
         return train_results
         
-
     
 def main(_A: argparse.Namespace):
     # -------------------------------------------------------------------------
