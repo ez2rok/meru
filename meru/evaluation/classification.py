@@ -219,8 +219,7 @@ class LinearProbeClassificationEvaluator:
         model_size = 'small'
         embd_dim = str(_model.visual_proj.weight.shape[0]).zfill(4)
         run_name = f'{model_name}_vit_{model_size}_{embd_dim}'
-        outdir = self.outdir / run_name
-        outdir.mkdir(parents=True, exist_ok=True)
+        outdir = self.outdir / run_name / 'classification'
         
         # Remove projection layer. Now `.encode_image()` will always give Euclidean
         # representations directly from the image encoder, regardless of model type.
@@ -232,8 +231,9 @@ class LinearProbeClassificationEvaluator:
         
         for dname in self._datasets:
             logger.info(f"Linear probe classification evaluation for {dname}:")
-            image_feats_path = outdir / f"{dname}_image_features.pth"
-            labels_path = outdir / f"{dname}_image_labels.pth"
+            image_feats_path = outdir / f"{dname}/image_features.pth"
+            labels_path = outdir / f"{dname}/image_labels.pth"
+            labels_path.parent.mkdir(parents=True, exist_ok=True)
             
             if image_feats_path.exists() and labels_path.exists():
                 logger.info(f"Loading image features and labels from {outdir}")
