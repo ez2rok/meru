@@ -139,6 +139,34 @@ def evaluate_model(
         all_eval_results.update({f'{eval_name}/time': end_time - start_time})
     return all_eval_results
 
+
+def get_log_str(
+    output_dict: dict,
+    train_timer: Timer,
+    data_time
+    ):
+    timer_stats = (
+        f"Iter {train_timer.iteration} | Time (sec): {data_time:.3f} data, "
+        f"{train_timer.deltas[-1]:.3f} model | ETA: {train_timer.eta_hhmm}"
+    )
+    log_str = f"{timer_stats} [GPU {dist.gpu_mem_usage()} MB]"
+    log_str += "\n\t\t\t| "
+    log_str += f"[total_loss {output_dict['loss'].item():.3f}]"
+    for key, value in output_dict["logging"].items():
+        log_str += f" [{key} {value:.3f}]"
+    return log_str
+
+def get_train_results(output_dict, scheduler, scaler):
+        train_results = {
+            'train/loss': output_dict["loss"].item(),
+            'lr': scheduler.get_last_lr()[0],
+            'amp_scale': scaler.get_scale(),
+            }
+        for name, _loss in output_dict["logging"].items():
+            train_results.update({f"train/{name}": _loss})
+        return train_results
+        
+
     
 def main(_A: argparse.Namespace):
     # -------------------------------------------------------------------------
@@ -286,27 +314,11 @@ def main(_A: argparse.Namespace):
                 
         # Log training stats to terminal and wandb.
         if iteration == start_iteration + 1 or iteration % _A.log_period == 0:
-            timer_stats = (
-                f"Iter {train_timer.iteration} | Time (sec): {data_time:.3f} data, "
-                f"{train_timer.deltas[-1]:.3f} model | ETA: {train_timer.eta_hhmm}"
-            )
-            log_str = f"{timer_stats} [GPU {dist.gpu_mem_usage()} MB]"
-            log_str += "\n\t\t\t| "
-            log_str += f"[total_loss {output_dict['loss'].item():.3f}]"
-            for key, value in output_dict["logging"].items():
-                log_str += f" [{key} {value:.3f}]"
+            log_str = get_log_str(output_dict, train_timer, data_time)
             logger.info(log_str)
-            
             if dist.is_main_process():
-                wandb.log({'train/loss': output_dict["loss"].item()}, commit=False)
-                for name, _loss in output_dict["logging"].items():
-                    wandb.log({f"train/{name}": _loss}, commit=False)
-                wandb.log({
-                    'lr': scheduler.get_last_lr()[0],
-                    'amp_scale': scaler.get_scale(),
-                    },
-                        step=iteration,
-                    )
+                train_results = get_train_results(output_dict, scheduler, scaler)
+                wandb.log(train_results, step=iteration)
             
         # Evaluate the model (only in main process).
         if dist.is_main_process() and iteration % _A.eval_period == 0:
