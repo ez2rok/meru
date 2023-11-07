@@ -10,12 +10,9 @@ from meru.evaluation.classification import ZeroShotClassificationEvaluator
 
 evaluator = L(ZeroShotClassificationEvaluator)(
     datasets_and_prompts={
-        "country211": [
-            "a photo i took in {}.",
-            "a photo i took while visiting {}.",
-            "a photo from my home country of {}.",
-            "a photo from my visit to {}.",
-            "a photo showing the country of {}.",
+       "food101": [
+            "food : {}.",
+            "food porn : {}.",
         ],
     },
     data_dir="datasets/eval",
