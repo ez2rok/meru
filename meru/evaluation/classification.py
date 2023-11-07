@@ -291,7 +291,10 @@ class LinearProbeClassificationEvaluator:
                 logger.info(f"Loading image features and labels from {outdir}")
                 image_feats = torch.load(image_feats_path)
                 labels = torch.load(labels_path)
-            else:
+            # Zero-shot image classification only uses test split and save a
+            # torch.tensor, not a dict. So if we do not have a dict, we must
+            # still extract the image features and labels.
+            elif not isinstance(image_feats, dict) or not isinstance(labels, dict):
                 # Extract image features, labels from [train, val, test] splits.
                 logger.info('Computing image and label features.')
                 image_feats, labels = {}, {}
