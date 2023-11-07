@@ -160,7 +160,7 @@ class ZeroShotClassificationEvaluator:
                 loader = DataLoader(
                     dataset,
                     sampler=sampler,
-                    batch_size=128,
+                    batch_size=512,
                     num_workers=self._num_workers,
                 )
                 image_feats, labels = _encode_dataset(
@@ -308,7 +308,7 @@ class LinearProbeClassificationEvaluator:
                     loader = DataLoader(
                         dataset,
                         sampler=sampler,
-                        batch_size=64, # lowered from 128 to fit in memory
+                        batch_size=512,
                         num_workers=self._num_workers,
                     )
                     image_feats[split], labels[split] = _encode_dataset(
