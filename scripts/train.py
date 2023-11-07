@@ -99,7 +99,9 @@ def initialize_wandb(
     _A: argparse.Namespace,
     _C: LazyConfig,
     ):
-    
+    """
+    Initialize wandb run.
+    """
     run_name = get_run_name(model)
     if _A.proj_layer_only:
         _C.model.embed_dim = _A.proj_layer_only
@@ -110,6 +112,33 @@ def initialize_wandb(
         config=OmegaConf.to_container(_C, resolve=True),
     )
     
+
+def evaluate_model(
+    model: Union[MERU, CLIPBaseline, DistributedDataParallel],
+    evaluators: dict[str, callable],
+    ) -> dict[str, float]:
+    
+    all_eval_results = {}
+    
+    # Loop over all evaluators.
+    for eval_name, evaluator in evaluators.items():
+        
+        # Run evalator.
+        start_time = time.perf_counter()
+        eval_results = evaluator(model)
+        end_time = time.perf_counter()
+        
+        # Log results to terminal.
+        header = ",".join(eval_results.keys())
+        numbers = ",".join([f"{num:.1f}" for num in eval_results.values()])
+        logger.info(f"\n{header}\n{numbers}")
+        
+        # Collect results in all_eval_results for logging to wandb.
+        for score_name, score in eval_results.items():
+            all_eval_results.update({f'{eval_name}/{score_name}': score})
+        all_eval_results.update({f'{eval_name}/time': end_time - start_time})
+    return all_eval_results
+
     
 def main(_A: argparse.Namespace):
     # -------------------------------------------------------------------------
@@ -226,6 +255,11 @@ def main(_A: argparse.Namespace):
     # Create wandb run, only in main process.
     if dist.is_main_process():
         initialize_wandb(model, _A, _C)
+        
+    # Evaluate model before training.
+    logger.info(f'Evaluating the model...')
+    all_eval_results = evaluate_model(model, evaluators)
+    wandb.log(all_eval_results, step=start_iteration)
     
     # -------------------------------------------------------------------------
     #   TRAINING LOOP
@@ -274,29 +308,13 @@ def main(_A: argparse.Namespace):
                         step=iteration,
                     )
             
-        # Log eval stats to terminal and wandb (only in main process).
-        if dist.is_main_process() and (
-            iteration == start_iteration + 1 or iteration % _A.eval_period == 0
-            ):
-            logger.info(f'Evaluating the model...')
-            
-            # Ensure only correct layers changed.
-            assert compare_models(original_model, model), "Model has changed."
-            
-            eval_stats = {}
-            for eval_name, evaluator in evaluators.items():
-                start_time = time.perf_counter()
-                results_dict = evaluator(model)
-                end_time = time.perf_counter()
-                
-                header = ",".join(results_dict.keys())
-                numbers = ",".join([f"{num:.1f}" for num in results_dict.values()])
-                logger.info(f"\n{header}\n{numbers}")
-                
-                for score_name, score in results_dict.items():
-                    eval_stats.update({f'{eval_name}/{score_name}': score})
-                eval_stats.update({f'{eval_name}/time': end_time - start_time})
-            wandb.log(eval_stats, step=iteration)
+        # Evaluate the model (only in main process).
+        if dist.is_main_process() and iteration % _A.eval_period == 0:
+            # Evaluate the final model outside train loop.
+            if iteration != _C.train.num_iterations:
+                logger.info(f'Evaluating the model...')
+                all_eval_results = evaluate_model(model, evaluators)
+                wandb.log(all_eval_results, step=iteration)
 
         # Save checkpoint to disk.
         if iteration % _A.checkpoint_period == 0 and dist.is_main_process():
@@ -317,23 +335,11 @@ def main(_A: argparse.Namespace):
                 model_state_dict = model.state_dict()
             torch.save(model_state_dict, path)
             
-    # Evaluate the final checkpoint.
+    # Evaluate the final model.
     if dist.is_main_process():
         logger.info(f'Evaluating the final model...')
-        eval_stats = {}
-        for eval_name, evaluator in evaluators.items():
-            start_time = time.perf_counter()
-            results_dict = evaluator(model, save=True)
-            end_time = time.perf_counter()
-            
-            header = ",".join(results_dict.keys())
-            numbers = ",".join([f"{num:.1f}" for num in results_dict.values()])
-            logger.info(f"\n{header}\n{numbers}")
-            
-            for score_name, score in results_dict.items():
-                eval_stats.update({f'{eval_name}/{score_name}': score})
-            eval_stats.update({f'{eval_name}/time': end_time - start_time})
-        wandb.log(eval_stats, step=iteration)
+        all_eval_results = evaluate_model(model, evaluators)
+        wandb.log(all_eval_results, step=iteration)
 
     # Close wandb run.
     wandb.finish()
