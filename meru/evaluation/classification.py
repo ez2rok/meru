@@ -10,12 +10,13 @@ from pathlib import Path
 
 import torch
 import torchvision.transforms as T
-from loguru import logger
-from sklearn.linear_model import LogisticRegression
+from torch.nn.parallel import DistributedDataParallel
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from torchmetrics.classification import MulticlassAccuracy
+from sklearn.linear_model import LogisticRegression
 from tqdm import tqdm
+from loguru import logger
 
 from meru import lorentz as L
 from meru.evaluation.catalog import DatasetCatalog
@@ -190,43 +191,77 @@ class LinearProbeClassificationEvaluator:
                 T.ToTensor(),
             ]
         )
-        self._sk_kwargs = {"random_state": 0, "max_iter": 1000}
+        self._sk_kwargs = {"random_state": 0, "max_iter": 1000, "verbose": 1}
 
     @torch.inference_mode()
-    def __call__(self, model: MERU | CLIPBaseline) -> dict[str, float]:
+    def __call__(
+        self,
+        model: MERU | CLIPBaseline,
+        outdir: str | Path = "embeddings",
+        ) -> dict[str, float]:
         # Remove projection layer. Now `.encode_image()` will always give Euclidean
         # representations directly from the image encoder, regardless of model type.
         model = model.eval()
         model.visual_proj = torch.nn.Identity()
-        device = model.device
+        
+        # check if model is an instance of torh DistributedDataParallel
+        # https://github.com/huggingface/transformers/issues/18974#issuecomment-1242985539
+        if isinstance(model, DistributedDataParallel):
+            _model = model.module
+        
+        # Make output directory.
+        if isinstance(outdir, str):
+            outdir = Path(outdir)
+        model_name = _model.__class__.__name__.lower()
+        model_size = 'small'
+        embd_dim = str(_model.visual_proj.weight.shape[0]).zfill(4)
+        run_name = f'{model_name}_vit_{model_size}_{embd_dim}'
+        outdir = outdir / run_name
+        outdir.mkdir(parents=True, exist_ok=True)
 
         # Collect results per task in this dict:
         results_dict = {}
-
+        
         for dname in self._datasets:
             logger.info(f"Linear probe classification evaluation for {dname}:")
-
-            # Extract image features and labels from [train, val, test] splits.
-            image_feats, labels = {}, {}
-            for split in ["train", "val", "test"]:
-                dataset, sampler = DatasetCatalog.build(
-                        dname, self._data_dir, split, self._image_transform
+            image_feats_path = outdir / f"{dname}_image_features.pth"
+            labels_path = outdir / f"{dname}_image_labels.pth"
+            
+            if image_feats_path.exists() and labels_path.exists():
+                logger.info(f"Loading image features and labels from {outdir}")
+                image_feats = torch.load(image_feats_path)
+                labels = torch.load(labels_path)
+            else:
+                # Extract image features, labels from [train, val, test] splits.
+                logger.info('Computing image and label features.')
+                image_feats, labels = {}, {}
+                for split in ["train", "val", "test"]:
+                    dataset, sampler = DatasetCatalog.build(
+                            dname, self._data_dir, split, self._image_transform
+                        )
+                    loader = DataLoader(
+                        dataset,
+                        sampler=sampler,
+                        batch_size=64, # lowered from 128 to fit in memory
+                        num_workers=self._num_workers,
                     )
-                loader = DataLoader(
-                    dataset,
-                    sampler=sampler,
-                    batch_size=64, # lowered from 128 to fit in memory
-                    num_workers=self._num_workers,
-                )
-                image_feats[split], labels[split] = _encode_dataset(
-                    loader, model, project=False
-                )
+                    image_feats[split], labels[split] = _encode_dataset(
+                        loader, _model, project=False
+                    )
+                    
+                # Save image features and labels to disk.
+                logger.info(f"Saving image features and labels to {outdir}")
+                torch.save(image_feats, image_feats_path)
+                torch.save(labels, labels_path)
 
             logger.info(
                 f"{dname} split sizes: train ({len(labels['train'])}), "
                 f"val ({len(labels['val'])}), test ({len(labels['test'])})"
             )
-
+            
+            # device = _model.device
+            device = 'cpu'
+            logger.info(f"Device: {device}")
             acc_meter = MulticlassAccuracy(DatasetCatalog.NUM_CLASSES[dname]).to(device)
             best_cost = 1.0
             
@@ -241,8 +276,11 @@ class LinearProbeClassificationEvaluator:
                 torch.cat([image_feats["train"], image_feats["val"]]),
                 torch.cat([labels["train"], labels["val"]]),
             )
+            logger.info(f"Fit classifier.")
             predictions = torch.as_tensor(final_classifier.predict_proba(image_feats["test"]))
+            logger.info(f"Predicted probabilities.")
             acc_meter(predictions.to(device), labels["test"].to(device))
+            logger.info(f"Computed accuracy.")
             final_accuracy = acc_meter.compute() * 100.0
             logger.info(f"Evaluation done, {dname} test acc = {final_accuracy:.3f}")
 
