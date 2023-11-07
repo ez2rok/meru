@@ -15,6 +15,7 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from torchmetrics.classification import MulticlassAccuracy
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score
 from tqdm import tqdm
 from loguru import logger
 
@@ -164,6 +165,7 @@ class LinearProbeClassificationEvaluator:
         num_workers: int = 4,
         image_size: int = 224,
         tune_hyperparams: bool = False,
+        outdir: str | Path = "embeddings",
     ):
         """
         Args:
@@ -178,11 +180,17 @@ class LinearProbeClassificationEvaluator:
                 bicubic interpolation, and take a square center crop.
             tune_hyperparams: If True, perform a hyperparameter sweep over cost
                 values for logistic regression using the validation set.
+            outdir: Directory to save extracted image features and labels for
+                each dataset.
         """
         self._datasets = datasets
         self._data_dir = Path(data_dir).resolve()
         self._num_workers = num_workers
         self.tune_hyperparams = tune_hyperparams
+        
+        if isinstance(outdir, str):
+            outdir = Path(outdir)
+        self.outdir = outdir
 
         self._image_transform = T.Compose(
             [
@@ -191,33 +199,33 @@ class LinearProbeClassificationEvaluator:
                 T.ToTensor(),
             ]
         )
-        self._sk_kwargs = {"random_state": 0, "max_iter": 1000, "verbose": 1}
+        self._sk_kwargs = {"random_state": 0, "max_iter": 1000}
 
     @torch.inference_mode()
     def __call__(
         self,
         model: MERU | CLIPBaseline,
-        outdir: str | Path = "embeddings",
+        save: bool = False,
         ) -> dict[str, float]:
-        # Remove projection layer. Now `.encode_image()` will always give Euclidean
-        # representations directly from the image encoder, regardless of model type.
-        model = model.eval()
-        model.visual_proj = torch.nn.Identity()
         
-        # check if model is an instance of torh DistributedDataParallel
+        # get model from torch DistributedDataParallel object
         # https://github.com/huggingface/transformers/issues/18974#issuecomment-1242985539
+        _model = model
         if isinstance(model, DistributedDataParallel):
             _model = model.module
         
         # Make output directory.
-        if isinstance(outdir, str):
-            outdir = Path(outdir)
         model_name = _model.__class__.__name__.lower()
         model_size = 'small'
         embd_dim = str(_model.visual_proj.weight.shape[0]).zfill(4)
         run_name = f'{model_name}_vit_{model_size}_{embd_dim}'
-        outdir = outdir / run_name
+        outdir = self.outdir / run_name
         outdir.mkdir(parents=True, exist_ok=True)
+        
+        # Remove projection layer. Now `.encode_image()` will always give Euclidean
+        # representations directly from the image encoder, regardless of model type.
+        model = model.eval()
+        model.visual_proj = torch.nn.Identity()
 
         # Collect results per task in this dict:
         results_dict = {}
@@ -249,25 +257,21 @@ class LinearProbeClassificationEvaluator:
                         loader, _model, project=False
                     )
                     
-                # Save image features and labels to disk.
-                logger.info(f"Saving image features and labels to {outdir}")
-                torch.save(image_feats, image_feats_path)
-                torch.save(labels, labels_path)
+                if save:
+                    # Save image features and labels to disk.
+                    logger.info(f"Saving image features and labels to {outdir}")
+                    torch.save(image_feats, image_feats_path)
+                    torch.save(labels, labels_path)
 
             logger.info(
                 f"{dname} split sizes: train ({len(labels['train'])}), "
                 f"val ({len(labels['val'])}), test ({len(labels['test'])})"
             )
             
-            # device = _model.device
-            device = 'cpu'
-            logger.info(f"Device: {device}")
-            acc_meter = MulticlassAccuracy(DatasetCatalog.NUM_CLASSES[dname]).to(device)
-            best_cost = 1.0
-            
-            # Find best cost value for logistic regression using validation set.
+            # Find best cost value for logistic regression via hyperparameter tuning.
+            best_cost = 1.0            
             if self.tune_hyperparams:
-                best_cost = _get_best_cost(image_feats, labels, device, self._sk_kwargs, acc_meter)
+                best_cost = _get_best_cost(image_feats, labels, self._sk_kwargs)
         
             # Train a classifier on (train+val) split with best cost.
             logger.info(f"Training classifier on (train+val) split with best cost.")
@@ -277,11 +281,11 @@ class LinearProbeClassificationEvaluator:
                 torch.cat([labels["train"], labels["val"]]),
             )
             logger.info(f"Fit classifier.")
-            predictions = torch.as_tensor(final_classifier.predict_proba(image_feats["test"]))
-            logger.info(f"Predicted probabilities.")
-            acc_meter(predictions.to(device), labels["test"].to(device))
-            logger.info(f"Computed accuracy.")
-            final_accuracy = acc_meter.compute() * 100.0
+            logits = torch.as_tensor(final_classifier.predict_proba(image_feats["test"]))
+            predictions = torch.argmax(logits, dim=-1)
+            final_accuracy = accuracy_score(
+                predictions, labels["test"]
+                ) * 100.0
             logger.info(f"Evaluation done, {dname} test acc = {final_accuracy:.3f}")
 
             results_dict[dname] = final_accuracy
@@ -320,9 +324,7 @@ def _encode_dataset(
 def _get_best_cost(
     image_feats: dict[str, torch.Tensor],
     labels: dict[str, torch.Tensor],
-    device: torch.device,
     _sk_kwargs: dict[str, int],
-    acc_meter: MulticlassAccuracy,
 ) -> float:
     """
     Perform a hyperparameter sweep over cost values for logistic
@@ -333,11 +335,8 @@ def _get_best_cost(
         image_feats: Tensor of shape (num_instances, embed_dim) containing
             image features extracted from the model.
         labels: Tensor of shape (num_instances,) containing integer labels.
-        device: Device to move tensors to.
         _sk_kwargs: Keyword arguments for
-        `sklearn.linear_model.LogisticRegression`.
-        acc_meter: Torchmetrics accuracy meter to compute accuracy.
-        
+        `sklearn.linear_model.LogisticRegression`.        
     """
    
     costs = [1e-6, 1e-4, 1e-2, 1, 1e2, 1e4, 1e6]
@@ -349,17 +348,14 @@ def _get_best_cost(
         classifier = LogisticRegression(C=cost, **_sk_kwargs)
         classifier.fit(image_feats["train"], labels["train"])
 
-        predictions = torch.as_tensor(classifier.predict_proba(image_feats["val"]))
-        acc_meter(predictions.to(device), labels["val"].to(device))
-        result = acc_meter.compute() * 100.0
+        logits = torch.as_tensor(classifier.predict_proba(image_feats["val"]))
+        predictions = torch.argmax(logits, dim=-1)
+        result = accuracy_score(predictions, labels["val"]) * 100.0
         logger.info(f"Cost = {cost:.6f}, Val acc = {result:.3f}")
 
         # Update best searched cost so far.
         if result > best_result:
             best_cost, best_result = cost, result
-
-        # Reset accuracy meter for next iteration.
-        acc_meter.reset()
 
     logger.info(f"Best cost from first sweep: {best_cost:.6f}")
     logger.info(f"Second pass: perform binary search around best cost...")
@@ -380,18 +376,14 @@ def _get_best_cost(
             classifier = LogisticRegression(C=cost, **_sk_kwargs)
             classifier.fit(image_feats["train"], labels["train"])
 
-            predictions = torch.as_tensor(classifier.predict_proba(image_feats["val"]))
-            acc_meter(predictions.to(device), labels["val"].to(device))
-            result = acc_meter.compute() * 100.0
-
+            logits = torch.as_tensor(classifier.predict_proba(image_feats["val"]))
+            predictions = torch.argmax(logits, dim=-1)
+            result = accuracy_score(predictions, labels["val"]) * 100.0
             logger.info(f"Cost = {cost:.6f}, Val acc = {result:.3f}")
 
             # Update best searched cost so far.
             if result > best_result:
                 best_cost, best_result = cost, result
-
-            # Reset accuracy meter for next iteration.
-            acc_meter.reset()
 
         # Half the search interval in log-space, for next search step.
         delta = delta**0.5
