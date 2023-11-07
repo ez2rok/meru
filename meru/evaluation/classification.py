@@ -137,11 +137,9 @@ class ZeroShotClassificationEvaluator:
 
                     all_class_feats.append(class_feats)
 
-                # shape: (num_classes, embed_dim)
                 classifier = torch.stack(all_class_feats, dim=0)
                 if save:
                     torch.save(classifier, classifier_path)
-            logger.info(f"Classifier shape: {classifier.shape}\tdevice: {classifier.device}")
 
             # Extract image features and labels from the test split of required dataset.
             image_feats_path = outdir / f"{dname}/image_features.pth"
@@ -174,7 +172,6 @@ class ZeroShotClassificationEvaluator:
                     logger.info(f"Saving image features and labels to {outdir}")
                     torch.save(image_feats, image_feats_path)
                     torch.save(labels, labels_path)
-            logger.info(f"Image features shape: {image_feats.shape}\tdevice: {image_feats.device}")
 
             # Features returned by this function will be on CPU, move to device:
             image_feats = image_feats.to(device)
@@ -286,16 +283,22 @@ class LinearProbeClassificationEvaluator:
             image_feats_path = outdir / f"{dname}/image_features.pth"
             labels_path = outdir / f"{dname}/image_labels.pth"
             labels_path.parent.mkdir(parents=True, exist_ok=True)
+            must_extract = True
             
+            # Load image features and labels if they exist.
             if image_feats_path.exists() and labels_path.exists():
                 logger.info(f"Loading image features and labels from {outdir}")
                 image_feats = torch.load(image_feats_path)
                 labels = torch.load(labels_path)
-            # Zero-shot image classification only uses test split and save a
-            # torch.tensor, not a dict. So if we do not have a dict, we must
-            # still extract the image features and labels.
-            elif not isinstance(image_feats, dict) or not isinstance(labels, dict):
-                # Extract image features, labels from [train, val, test] splits.
+                
+                # Zero-shot image clf only uses test split and saves a
+                # torch.tensor; linear prob uses all 3 splits and saves a
+                # dict. So if we not dict, we must still extract the image
+                # features and labels.
+                must_extract = not (isinstance(image_feats, dict) and isinstance(labels, dict))
+                
+            # Extract image features, labels from [train, val, test] splits.
+            elif must_extract:
                 logger.info('Computing image and label features.')
                 image_feats, labels = {}, {}
                 for split in ["train", "val", "test"]:
