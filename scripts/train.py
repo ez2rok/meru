@@ -285,9 +285,10 @@ def main(_A: argparse.Namespace):
         initialize_wandb(model, _A, _C)
         
     # Evaluate model before training.
-    logger.info(f'Evaluating the model...')
-    all_eval_results = evaluate_model(model, evaluators)
-    wandb.log(all_eval_results, step=start_iteration)
+    if dist.is_main_process():
+        logger.info(f'Evaluating the model...')
+        all_eval_results = evaluate_model(model, evaluators)
+        wandb.log(all_eval_results, step=start_iteration)
     
     # -------------------------------------------------------------------------
     #   TRAINING LOOP
