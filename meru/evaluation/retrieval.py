@@ -36,6 +36,7 @@ class ZeroShotRetrievalEvaluator:
         data_dir: str | Path,
         ks: list[int] = [5, 10],
         image_size: int = 224,
+        outdir: str | Path = "embeddings",
     ):
         """
         Args:
@@ -46,21 +47,45 @@ class ZeroShotRetrievalEvaluator:
             ks: Top-k image/text to retrieve for calculating metrics.
             image_size: Resize images to this size for evaluation. All images
                 are _squeezed_ in squares using bicubic interpolation.
+            outdir: Directory to save extracted image features and distances for
+                each dataset.
         """
         self._datasets = datasets
         self._data_dir = Path(data_dir).resolve()
         self._ks = ks
         self._image_size = image_size
+        
+        if isinstance(outdir, str):
+            outdir = Path(outdir)
+        self.outdir = outdir
+        
         super().__init__()
 
     @torch.inference_mode()
-    def __call__(self, model: MERU | CLIPBaseline) -> dict[str, float]:
+    def __call__(
+        self, 
+        model: MERU | CLIPBaseline,
+        save: bool = False,
+        ) -> dict[str, float]:
         model = model.eval()
 
         _resize = (self._image_size, self._image_size)
         image_transform = T.Compose(
             [T.Resize(_resize, T.InterpolationMode.BICUBIC), T.ToTensor()]
         )
+        
+        # get model from torch DistributedDataParallel object
+        # https://github.com/huggingface/transformers/issues/18974#issuecomment-1242985539
+        _model = model
+        if isinstance(model, DistributedDataParallel):
+            _model = model.module
+        
+        # Make output directory.
+        model_name = _model.__class__.__name__.lower()
+        model_size = 'small'
+        embd_dim = str(_model.visual_proj.weight.shape[0]).zfill(4)
+        run_name = f'{model_name}_vit_{model_size}_{embd_dim}'
+        outdir = self.outdir / run_name / 'retrieval'
 
         # Collect results per task in this dict:
         results_dict = {}
@@ -70,15 +95,29 @@ class ZeroShotRetrievalEvaluator:
             data_loader, _ = DatasetCatalog.build(
                 dname, self._data_dir, "test", image_transform
             )
-
-            # Encode all images and captions.
-            encoded_data = _encode_dataset(data_loader, model)
+            
+            encoded_data_path = outdir / f"{dname}/encoded_data.pth"
+            encoded_data_path.parent.mkdir(parents=True, exist_ok=True)     
+            # Load features and IDs if they exist.
+            if encoded_data_path.exists():
+                logger.info(
+                    f"Loading image/text features and IDs to {outdir}"
+                    )
+                encoded_data = torch.load(encoded_data_path)
+            else:
+                # Encode all images and captions.
+                encoded_data = _encode_dataset(data_loader, model)        
+                if save:
+                    logger.info(
+                        f"Saving image/text features and IDs to {outdir}"
+                        )
+                    torch.save(encoded_data, encoded_data_path)
+            
             image_feats = encoded_data["image_feats"].to(model.device)
             text_feats = encoded_data["text_feats"].to(model.device)
-
             image_ids = torch.tensor(encoded_data["image_ids"])
             text_ids = torch.tensor(encoded_data["text_ids"])
-
+                
             # Text-to-image retrieval: make mapping as {text_id: [sorted image_ids]}
             text_to_image_retr = {}
 
