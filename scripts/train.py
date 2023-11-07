@@ -26,6 +26,7 @@ from meru.config import LazyConfig, LazyFactory
 from meru.tokenizer import Tokenizer
 from meru.utils.checkpointing import CheckpointManager
 from meru.utils.timer import Timer
+from meru.utils.io import get_run_name
 from configs.test.linprobe_classification import evaluator as linprobe_clf_evaluator
 from configs.test.zero_shot_classification import evaluator as zeroshot_clf_evaluator
 from configs.test.zero_shot_retrieval import evaluator as zeroshot_retrieval_evaluator
@@ -205,11 +206,9 @@ def main(_A: argparse.Namespace):
         
     # Create wandb run, only in main process.
     if dist.is_main_process():
-        model_name = _model.__class__.__name__.lower()
-        model_size = _C.model.visual.arch.split('_')[1]
-        embd_dim = str(_model.visual_proj.weight.shape[0]).zfill(4)
-        run_name = f'{model_name}-vit-{model_size}-{embd_dim}'
-        _C.model.embed_dim = embd_dim
+        run_name = get_run_name(model)
+        if _A.proj_layer_only:
+            _C.model.embed_dim = _A.proj_layer_only
         
         wandb.login()
         wandb.init(
