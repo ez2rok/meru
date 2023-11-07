@@ -159,9 +159,9 @@ def main(_A: argparse.Namespace):
     original_model = copy.deepcopy(model)
     
     evaluators = {
-        # "zero_shot_classification": instantiate(zeroshot_clf_evaluator),
-        "linear_probe_classification": instantiate(linprobe_clf_evaluator),
         "zero_shot_retrieval": instantiate(zeroshot_retrieval_evaluator),
+        "linear_probe_classification": instantiate(linprobe_clf_evaluator),
+        "zero_shot_classification": instantiate(zeroshot_clf_evaluator),
     }
 
     # Create an iterator from dataloader to sample batches perpetually.
