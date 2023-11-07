@@ -11,6 +11,7 @@ import argparse
 import time
 import random
 from pathlib import Path
+from typing import Union
 
 import torch
 import wandb
@@ -27,6 +28,7 @@ from meru.tokenizer import Tokenizer
 from meru.utils.checkpointing import CheckpointManager
 from meru.utils.timer import Timer
 from meru.utils.io import get_run_name
+from meru.models import MERU, CLIPBaseline
 from configs.test.linprobe_classification import evaluator as linprobe_clf_evaluator
 from configs.test.zero_shot_classification import evaluator as zeroshot_clf_evaluator
 from configs.test.zero_shot_retrieval import evaluator as zeroshot_retrieval_evaluator
@@ -92,6 +94,23 @@ parser.add_argument(
 # fmt: on
 
 
+def initialize_wandb(
+    model: Union[MERU, CLIPBaseline, DistributedDataParallel],
+    _A: argparse.Namespace,
+    _C: LazyConfig,
+    ):
+    
+    run_name = get_run_name(model)
+    if _A.proj_layer_only:
+        _C.model.embed_dim = _A.proj_layer_only
+    
+    wandb.login()
+    wandb.init(
+        project='meru', name=run_name,
+        config=OmegaConf.to_container(_C, resolve=True),
+    )
+    
+    
 def main(_A: argparse.Namespace):
     # -------------------------------------------------------------------------
     #   BASIC SETUP FOR TRAINING JOB.
@@ -206,15 +225,7 @@ def main(_A: argparse.Namespace):
         
     # Create wandb run, only in main process.
     if dist.is_main_process():
-        run_name = get_run_name(model)
-        if _A.proj_layer_only:
-            _C.model.embed_dim = _A.proj_layer_only
-        
-        wandb.login()
-        wandb.init(
-            project='meru', name=run_name,
-            config=OmegaConf.to_container(_C, resolve=True),
-        )
+        initialize_wandb(model, _A, _C)
     
     # -------------------------------------------------------------------------
     #   TRAINING LOOP
