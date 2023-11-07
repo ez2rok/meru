@@ -235,8 +235,8 @@ def main(_A: argparse.Namespace):
     original_model = copy.deepcopy(model)
     
     evaluators = {
-        "zero_shot_retrieval": instantiate(zeroshot_retrieval_evaluator),
         "linear_probe_classification": instantiate(linprobe_clf_evaluator),
+        "zero_shot_retrieval": instantiate(zeroshot_retrieval_evaluator),
         "zero_shot_classification": instantiate(zeroshot_clf_evaluator),
     }
 
@@ -347,9 +347,10 @@ def main(_A: argparse.Namespace):
                 model_state_dict = model.state_dict()
             torch.save(model_state_dict, path)
             
-    # Evaluate the final model.
+    # Evaluate the final model with hyperparameter tuning.
     if dist.is_main_process():
         logger.info(f'Evaluating the final model...')
+        evaluators["linear_probe_classification"].tune_hyperparams = True
         all_eval_results = evaluate_model(model, evaluators)
         wandb.log(all_eval_results, step=iteration)
 
