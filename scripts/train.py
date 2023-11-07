@@ -160,8 +160,8 @@ def main(_A: argparse.Namespace):
     
     evaluators = {
         # "zero_shot_classification": instantiate(zeroshot_clf_evaluator),
-        "zero_shot_retrieval": instantiate(zeroshot_retrieval_evaluator),
         "linear_probe_classification": instantiate(linprobe_clf_evaluator),
+        "zero_shot_retrieval": instantiate(zeroshot_retrieval_evaluator),
     }
 
     # Create an iterator from dataloader to sample batches perpetually.
@@ -268,7 +268,7 @@ def main(_A: argparse.Namespace):
         if dist.is_main_process() and (
             iteration == start_iteration + 1 or iteration % _A.eval_period == 0
             ):
-            logger.info(f'Evaluating on validation set...')
+            logger.info(f'Evaluating the model...')
             
             # Ensure only correct layers changed.
             assert compare_models(original_model, model), "Model has changed."
@@ -306,6 +306,24 @@ def main(_A: argparse.Namespace):
             else:
                 model_state_dict = model.state_dict()
             torch.save(model_state_dict, path)
+            
+    # Evaluate the final checkpoint.
+    if dist.is_main_process():
+        logger.info(f'Evaluating the final model...')
+        eval_stats = {}
+        for eval_name, evaluator in evaluators.items():
+            start_time = time.perf_counter()
+            results_dict = evaluator(model, save=True)
+            end_time = time.perf_counter()
+            
+            header = ",".join(results_dict.keys())
+            numbers = ",".join([f"{num:.1f}" for num in results_dict.values()])
+            logger.info(f"\n{header}\n{numbers}")
+            
+            for score_name, score in results_dict.items():
+                eval_stats.update({f'{eval_name}/{score_name}': score})
+            eval_stats.update({f'{eval_name}/time': end_time - start_time})
+        wandb.log(eval_stats, step=iteration)
 
     # Close wandb run.
     wandb.finish()
