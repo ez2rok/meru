@@ -52,5 +52,6 @@ wandb/
 # jupter notebooks
 notebooks/
 
-# saved models
+# saved artifacts
 models/
+embeddings/
