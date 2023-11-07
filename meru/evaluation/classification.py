@@ -42,6 +42,7 @@ class ZeroShotClassificationEvaluator:
         data_dir: str | Path,
         num_workers: int = 4,
         image_size: int = 224,
+        outdir: str | Path = "embeddings",
     ):
         """
         Args:
@@ -56,10 +57,16 @@ class ZeroShotClassificationEvaluator:
             image_size: Resize and crop images to this size for evaluation. We
                 resize the smaller image edge (keeping aspect ratio same) using
                 bicubic interpolation, and take a square center crop.
+            outdir: Directory to save extracted image features and labels for
+                each dataset.
         """
         self._datasets_and_prompts = datasets_and_prompts
         self._data_dir = Path(data_dir).resolve()
         self._num_workers = num_workers
+        
+        if isinstance(outdir, str):
+            outdir = Path(outdir)
+        self.outdir = outdir
 
         self._image_transform = T.Compose(
             [
@@ -70,12 +77,29 @@ class ZeroShotClassificationEvaluator:
         )
 
     @torch.inference_mode()
-    def __call__(self, model: MERU | CLIPBaseline) -> dict[str, float]:
+    def __call__(
+        self,
+        model: MERU | CLIPBaseline,
+        save: bool = False,
+        ) -> dict[str, float]:
         model = model.eval()
         tokenizer = Tokenizer()
 
         # Collect results per task in this dict:
         results_dict = {}
+        
+        # get model from torch DistributedDataParallel object
+        # https://github.com/huggingface/transformers/issues/18974#issuecomment-1242985539
+        device = model.device
+        if isinstance(model, DistributedDataParallel):
+            model = model.module
+        
+        # Make output directory.
+        model_name = model.__class__.__name__.lower()
+        model_size = 'small'
+        embd_dim = str(model.visual_proj.weight.shape[0]).zfill(4)
+        run_name = f'{model_name}_vit_{model_size}_{embd_dim}'
+        outdir = self.outdir / run_name / 'classification'
 
         for dname, prompts in self._datasets_and_prompts.items():
             logger.info(f"Zero-shot classification evaluation for {dname}:")
@@ -84,60 +108,88 @@ class ZeroShotClassificationEvaluator:
             # ----------------------------------------------------------------
             class_names = CLASS_NAMES[dname]
 
-            # Collect text features of each class.
-            all_class_feats: list[torch.Tensor] = []
+            classifier_path = outdir / f"{dname}/classifier.pth"
+            classifier_path.parent.mkdir(parents=True, exist_ok=True)
+            if classifier_path.exists():
+                logger.info(f"Loading classifier from {classifier_path}")
+                classifier = torch.load(classifier_path)
+            else:
+                # Compute text features of each class.
+                all_class_feats: list[torch.Tensor] = []
 
-            for name in class_names:
-                # Fill prompt templates with class name and tokenize them.
-                class_prompts = [_pt.format(name) for _pt in prompts]
+                for name in class_names:
+                    # Fill prompt templates with class name and tokenize them.
+                    class_prompts = [_pt.format(name) for _pt in prompts]
 
-                class_prompt_tokens = tokenizer(class_prompts)
-                class_feats = model.encode_text(class_prompt_tokens, project=False)
+                    class_prompt_tokens = tokenizer(class_prompts)
+                    class_feats = model.encode_text(class_prompt_tokens, project=False)
 
-                if isinstance(model, MERU):
-                    # Ensemble in the tangent space, then project to Hyperboloid.
-                    class_feats = class_feats.mean(dim=0)
-                    class_feats = class_feats * model.textual_alpha.exp()
-                    class_feats = L.exp_map0(class_feats, model.curv.exp())
-                else:
-                    # Ensemble prompt features: normalize -> average -> normalize.
-                    class_feats = F.normalize(class_feats, dim=-1)
-                    class_feats = class_feats.mean(dim=0)
-                    class_feats = F.normalize(class_feats, dim=-1)
+                    if isinstance(model, MERU):
+                        # Ensemble in the tangent space, then project to Hyperboloid.
+                        class_feats = class_feats.mean(dim=0)
+                        class_feats = class_feats * model.textual_alpha.exp()
+                        class_feats = L.exp_map0(class_feats, model.curv.exp())
+                    else:
+                        # Ensemble prompt features: normalize -> average -> normalize.
+                        class_feats = F.normalize(class_feats, dim=-1)
+                        class_feats = class_feats.mean(dim=0)
+                        class_feats = F.normalize(class_feats, dim=-1)
 
-                all_class_feats.append(class_feats)
+                    all_class_feats.append(class_feats)
 
-            # shape: (num_classes, embed_dim)
-            classifier = torch.stack(all_class_feats, dim=0)
-            # ----------------------------------------------------------------
+                # shape: (num_classes, embed_dim)
+                classifier = torch.stack(all_class_feats, dim=0)
+                if save:
+                    torch.save(classifier, classifier_path)
+            logger.info(f"Classifier shape: {classifier.shape}\tdevice: {classifier.device}")
 
             # Extract image features and labels from the test split of required dataset.
-            loader = DataLoader(
-                DatasetCatalog.build(
-                    dname, self._data_dir, "test", self._image_transform
-                ),
-                batch_size=128,
-                num_workers=self._num_workers,
-            )
-            image_feats, labels = _encode_dataset(loader, model, project=True)
+            image_feats_path = outdir / f"{dname}/image_features.pth"
+            labels_path = outdir / f"{dname}/image_labels.pth"
+            
+            if image_feats_path.exists() and labels_path.exists():
+                logger.info(f"Loading image features and labels from {outdir}")
+                image_feats = torch.load(image_feats_path)
+                labels = torch.load(labels_path)
+                if isinstance(image_feats, dict):
+                    image_feats = image_feats['test']
+                if isinstance(labels, dict):
+                    labels = labels['test']
+            else:
+                dataset, sampler = DatasetCatalog.build(
+                        dname, self._data_dir, "test", self._image_transform
+                    )
+                loader = DataLoader(
+                    dataset,
+                    sampler=sampler,
+                    batch_size=128,
+                    num_workers=self._num_workers,
+                )
+                image_feats, labels = _encode_dataset(
+                    loader, model, project=True
+                    )
+                
+                # Save image features and labels.
+                if save:
+                    logger.info(f"Saving image features and labels to {outdir}")
+                    torch.save(image_feats, image_feats_path)
+                    torch.save(labels, labels_path)
+            logger.info(f"Image features shape: {image_feats.shape}\tdevice: {image_feats.device}")
 
             # Features returned by this function will be on CPU, move to device:
-            image_feats = image_feats.to(model.device)
-
-            # Measure model performance according to accuracy metric of the dataset.
-            acc_meter = MulticlassAccuracy(DatasetCatalog.NUM_CLASSES[dname])
-
+            image_feats = image_feats.to(device)
+            
             # Evaluate in small batches of 256 instances.
+            correct = 0
             for _feats, _labels in zip(image_feats.split(256), labels.split(256)):
                 # Compute pairwise similarity depending on model type:
                 if isinstance(model, MERU):
                     scores = L.pairwise_inner(_feats, classifier, model.curv.exp())
                 else:
                     scores = _feats @ classifier.T
-
-                acc_meter(scores.cpu(), _labels)
-
-            accuracy = acc_meter.compute() * 100.0
+                predictions = torch.argmax(scores.cpu(), dim=-1)
+                correct += (predictions == _labels).float().sum().item()
+            accuracy = correct / len(labels) * 100.0
             results_dict[dname] = accuracy
 
             logger.info(
@@ -257,8 +309,8 @@ class LinearProbeClassificationEvaluator:
                         loader, _model, project=False
                     )
                     
+                # Save image features and labels.
                 if save:
-                    # Save image features and labels to disk.
                     logger.info(f"Saving image features and labels to {outdir}")
                     torch.save(image_feats, image_feats_path)
                     torch.save(labels, labels_path)
