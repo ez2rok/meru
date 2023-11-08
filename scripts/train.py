@@ -320,8 +320,8 @@ def main(_A: argparse.Namespace):
                 train_results = get_train_results(output_dict, scheduler, scaler)
                 wandb.log(train_results, step=iteration)
             
-        # Evaluate the model (only in main process).
-        if dist.is_main_process() and iteration % _A.eval_period == 0:
+        # Evaluate the model.
+        if iteration % _A.eval_period == 0 and dist.is_main_process():
             # Evaluate the final model outside train loop.
             if iteration != _C.train.num_iterations:
                 logger.info(f'Evaluating the model...')
@@ -331,13 +331,14 @@ def main(_A: argparse.Namespace):
         # Save checkpoint to disk.
         if iteration % _A.checkpoint_period == 0 and dist.is_main_process():
             checkpoint_manager.step(iteration)
+    logger.info("Finished training.")
 
     # Save the final checkpoint.
     if dist.is_main_process():
         checkpoint_manager.final_step()
         
         if _A.save_model:
-            run_name = run_name.replace('-', '_')
+            run_name = get_run_name(model, seperator='_')
             path = Path('models') / f'{run_name}.pth'
             path.parent.mkdir(parents=True, exist_ok=True)
             
