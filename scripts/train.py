@@ -159,12 +159,14 @@ def get_log_str(
 
 def get_train_results(output_dict, scheduler, scaler):
         train_results = {
-            'train/loss': output_dict["loss"].item(),
-            'lr': scheduler.get_last_lr()[0],
-            'amp_scale': scaler.get_scale(),
+            'train/loss/total_loss': output_dict["loss"].item(),
+            'train/loss/contrastive_loss': output_dict["contrastive_loss"],
+            'train/loss/entailment_loss': output_dict["entailment_loss"],
+            'train/params/logit_scale': output_dict["logit_scale"],
+            'train/params/curv': output_dict["curv"],
+            'train/params/lr': scheduler.get_last_lr()[0],
+            'train/params/amp_scale': scaler.get_scale(),
             }
-        for name, _loss in output_dict["logging"].items():
-            train_results.update({f"train/{name}": _loss})
         return train_results
         
     
