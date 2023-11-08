@@ -358,7 +358,8 @@ def main(_A: argparse.Namespace):
         logger.info("Finished evaluating the final model.")
 
     # Close wandb run.
-    wandb.finish()
+    if dist.is_main_process():
+        wandb.finish()
 
 if __name__ == "__main__":
     _A = parser.parse_args()
