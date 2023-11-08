@@ -326,7 +326,7 @@ def main(_A: argparse.Namespace):
             if dist.is_main_process():
                 train_results = get_train_results(output_dict, scheduler, scaler)
                 wandb.log(train_results, step=iteration)
-            logger.info("Finished logging to wandb.")
+                logger.info("Finished logging to wandb.")
             
         # Evaluate the model.
         if iteration % _A.eval_period == 0 and dist.is_main_process():
