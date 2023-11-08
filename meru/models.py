@@ -169,9 +169,15 @@ class CLIPBaseline(nn.Module):
             F.cross_entropy(image_logits, targets)
             + F.cross_entropy(text_logits, targets)
         )
+        
         output_dict = {
             "loss": loss,
-            "logging": {"contrastive_loss": loss, "logit_scale": _scale},
+            "logging_loss": {
+                "contrastive_loss": loss,
+            },
+            "logging_params": {
+                "logit_scale": _scale,
+            },
         }
         return output_dict
 
@@ -335,7 +341,7 @@ class MERU(CLIPBaseline):
             if self.entail_weight > 0:
                 loss = loss + self.entail_weight * entailment_loss
 
-        return {
+        output_dict = {
             "loss": loss,
             "logging_loss": {
                 "contrastive_loss": contrastive_loss,
@@ -346,3 +352,4 @@ class MERU(CLIPBaseline):
                 "curv": _curv,
             },
         }
+        return output_dict
