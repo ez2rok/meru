@@ -12,7 +12,7 @@ do
     cp checkpoints/meru_vit_s.pth output/meru_vit_small_$dim/meru_vit_s.pth
 
     # Train model.
-    python scripts/train.py --config configs/train_meru_vit_s.py --proj-layer-only $dim --output-dir ./output/meru_vit_small_$dim --resume --num-gpus 2 --save train.num_iterations=130000
+    python scripts/train.py --config configs/train_meru_vit_s.py --proj-layer-only $dim --output-dir ./output/meru_vit_small_$dim --resume --num-gpus 2 --save train.num_iterations=125000
 
     ######################
     ######## CLIP ########
@@ -23,6 +23,6 @@ do
     cp checkpoints/clip_vit_s.pth output/clip_vit_small_$dim/clip_vit_s.pth
 
     # Train model.
-    python scripts/train.py --config configs/train_clip_vit_s.py --proj-layer-only $dim --output-dir ./output/clip_vit_small_$dim --resume --num-gpus 2 --save train.num_iterations=130000
+    python scripts/train.py --config configs/train_clip_vit_s.py --proj-layer-only $dim --output-dir ./output/clip_vit_small_$dim --resume --num-gpus 2 --save train.num_iterations=125000
 
 done
