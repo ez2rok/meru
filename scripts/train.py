@@ -153,20 +153,22 @@ def get_log_str(
     log_str = f"{timer_stats} [GPU {dist.gpu_mem_usage()} MB]"
     log_str += "\n\t\t\t| "
     log_str += f"[total_loss {output_dict['loss'].item():.3f}]"
-    for key, value in output_dict["logging"].items():
+    for key, value in output_dict["logging_loss"].items():
+        log_str += f" [{key} {value:.3f}]"
+    for key, value in output_dict["logging_params"].items():
         log_str += f" [{key} {value:.3f}]"
     return log_str
 
 def get_train_results(output_dict, scheduler, scaler):
         train_results = {
-            'train/loss/total_loss': output_dict["loss"].item(),
-            'train/loss/contrastive_loss': output_dict["contrastive_loss"],
-            'train/loss/entailment_loss': output_dict["entailment_loss"],
-            'train/params/logit_scale': output_dict["logit_scale"],
-            'train/params/curv': output_dict["curv"],
+            'train/loss/total_loss': output_dict['loss'].item(),
             'train/params/lr': scheduler.get_last_lr()[0],
             'train/params/amp_scale': scaler.get_scale(),
             }
+        for name, _loss in output_dict['logging_loss'].items():
+            train_results.update({f'train/loss/{name}': _loss})
+        for name, param in output_dict['logging_params'].items():
+            train_results.update({f'train/params/{name}': param})
         return train_results
         
     
@@ -324,6 +326,7 @@ def main(_A: argparse.Namespace):
             if dist.is_main_process():
                 train_results = get_train_results(output_dict, scheduler, scaler)
                 wandb.log(train_results, step=iteration)
+            logger.info("Finished logging to wandb.")
             
         # Evaluate the model.
         if iteration % _A.eval_period == 0 and dist.is_main_process():

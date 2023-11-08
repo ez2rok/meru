@@ -337,9 +337,11 @@ class MERU(CLIPBaseline):
 
         return {
             "loss": loss,
-            "logging": {
+            "logging_loss": {
                 "contrastive_loss": contrastive_loss,
                 "entailment_loss": entailment_loss,
+            },
+            "logging_params": {
                 "logit_scale": _scale,
                 "curv": _curv,
             },
