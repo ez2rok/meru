@@ -242,11 +242,6 @@ def main(_A: argparse.Namespace):
     train_timer = Timer(
         start_iteration + 1, total_iterations=_C.train.num_iterations
         )
-    
-    # Use internal `module` for DDP.
-    _model = model.module if isinstance(
-        model, DistributedDataParallel
-        ) else model
         
     # Freeze all layers except projection layer. Projection layer is
     # initialized with dimension specified by _A.proj_layer_only.
@@ -254,6 +249,11 @@ def main(_A: argparse.Namespace):
         
         # Copy original model for later comparison.
         original_model = copy.deepcopy(model)
+        
+        # Use internal `module` for DDP.
+        _model = model.module if isinstance(
+            model, DistributedDataParallel
+            ) else model
             
         # Freeze all params except for learnable params.
         learnable_params = set([
