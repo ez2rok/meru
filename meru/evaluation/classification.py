@@ -99,7 +99,7 @@ class ZeroShotClassificationEvaluator:
         model_size = 'small'
         embd_dim = str(model.visual_proj.weight.shape[0]).zfill(4)
         run_name = f'{model_name}_vit_{model_size}_{embd_dim}'
-        outdir = self.outdir / run_name / 'classification'
+        outdir = self.outdir / run_name
 
         for dname, prompts in self._datasets_and_prompts.items():
             logger.info(f"Zero-shot classification evaluation for {dname}:")
@@ -268,7 +268,7 @@ class LinearProbeClassificationEvaluator:
         model_size = 'small'
         embd_dim = str(_model.visual_proj.weight.shape[0]).zfill(4)
         run_name = f'{model_name}_vit_{model_size}_{embd_dim}'
-        outdir = self.outdir / run_name / 'classification'
+        outdir = self.outdir / run_name
         
         # Remove projection layer. Now `.encode_image()` will always give Euclidean
         # representations directly from the image encoder, regardless of model type.
