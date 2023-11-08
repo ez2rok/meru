@@ -10,6 +10,7 @@ Train a MERU or CLIP model based on parameters specified by a config file.
 import argparse
 import time
 import random
+import copy
 from pathlib import Path
 from typing import Union
 
@@ -230,10 +231,6 @@ def main(_A: argparse.Namespace):
     )
     start_iteration = checkpoint_manager.resume() if _A.resume else 0
     
-    # Copy original model for evaluation.
-    import copy
-    original_model = copy.deepcopy(model)
-    
     evaluators = {
         "linear_probe_classification": instantiate(linprobe_clf_evaluator),
         "zero_shot_retrieval": instantiate(zeroshot_retrieval_evaluator),
@@ -254,6 +251,9 @@ def main(_A: argparse.Namespace):
     # Freeze all layers except projection layer. Projection layer is
     # initialized with dimension specified by _A.proj_layer_only.
     if _A.proj_layer_only:
+        
+        # Copy original model for later comparison.
+        original_model = copy.deepcopy(model)
             
         # Freeze all params except for learnable params.
         learnable_params = set([
@@ -277,7 +277,10 @@ def main(_A: argparse.Namespace):
         model.module = _model # is this needed?
         optimizer = LazyFactory.build_optimizer(_C, _model)
         
-    assert compare_models(original_model, model), "Model has changed."
+        msg = "Unintended layers in the model have changed."
+        assert compare_models(
+            original_model, model, exceptions=learnable_params
+            ), msg
         
     # Create wandb run, only in main process.
     if dist.is_main_process():
