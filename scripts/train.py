@@ -351,9 +351,11 @@ def main(_A: argparse.Namespace):
     # Evaluate the final model with hyperparameter tuning.
     if dist.is_main_process():
         logger.info(f'Evaluating the final model...')
-        evaluators["linear_probe_classification"].tune_hyperparams = True
+        if "linear_probe_classification" in evaluators:
+            evaluators["linear_probe_classification"].tune_hyperparams = True
         all_eval_results = evaluate_model(model, evaluators)
         wandb.log(all_eval_results, step=iteration)
+        logger.info("Finished evaluating the final model.")
 
     # Close wandb run.
     wandb.finish()
