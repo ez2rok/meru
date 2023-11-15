@@ -113,6 +113,7 @@ class ZeroShotRetrievalEvaluator:
                         )
                     torch.save(encoded_data, encoded_data_path)
             
+            # Unpack encoded data.
             image_feats = encoded_data["image_feats"].to(model.device)
             text_feats = encoded_data["text_feats"].to(model.device)
             image_ids = torch.tensor(encoded_data["image_ids"])
