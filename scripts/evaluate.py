@@ -25,6 +25,7 @@ _AA = parser.add_argument
 _AA("--config", help="Path to an evaluation config file (.py)")
 _AA("--checkpoint-path", help="Path to checkpoint of a trained MERU/CLIP model.")
 _AA("--train-config", help="Path to train config (.yaml/py) for given checkpoint.")
+_AA("--save", action="store_true", help="If true, save evaluation artifacts.")
 
 
 def main(_A: argparse.Namespace):
@@ -51,7 +52,7 @@ def main(_A: argparse.Namespace):
     model = LazyFactory.build_model(_C_TRAIN, device).eval()
     CheckpointManager(model=model).load(_A.checkpoint_path)
 
-    results_dict = evaluator(model)
+    results_dict = evaluator(model, save=_A.save)
 
     # Log results for copy-pasting to spreadsheet, including checkpoint path.
     header = ",".join(results_dict.keys())
