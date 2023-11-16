@@ -362,7 +362,7 @@ def main(_A: argparse.Namespace):
         if "linear_probe_classification" in evaluators:
             evaluators["linear_probe_classification"].tune_hyperparams = True
         all_eval_results = evaluate_model(model, evaluators)
-        wandb.log(all_eval_results, step=iteration)
+        wandb.log(all_eval_results, step=_C.train.num_iterations)
         logger.info("Finished evaluating the final model.")
 
     # Close wandb run.
