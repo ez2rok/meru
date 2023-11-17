@@ -84,7 +84,9 @@ class ZeroShotRetrievalEvaluator:
         model_name = _model.__class__.__name__.lower()
         model_size = 'small'
         embd_dim = str(_model.visual_proj.weight.shape[0]).zfill(4)
-        run_name = f'{model_name}_vit_{model_size}_{embd_dim}'
+        proj_str = 'P' if self.proj else 'X'
+        norm_str = 'N' if self.norm else 'X'
+        run_name = f'{model_name}_vit_{model_size}_{embd_dim}_E{proj_str}{norm_str}'
         outdir = self.outdir / run_name
 
         # Collect results per task in this dict:

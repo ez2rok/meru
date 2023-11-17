@@ -43,6 +43,8 @@ class ZeroShotClassificationEvaluator:
         num_workers: int = 4,
         image_size: int = 224,
         outdir: str | Path = "embeddings",
+        proj: bool = True,
+        norm: bool = False,
     ):
         """
         Args:
@@ -59,10 +61,17 @@ class ZeroShotClassificationEvaluator:
                 bicubic interpolation, and take a square center crop.
             outdir: Directory to save extracted image features and labels for
                 each dataset.
+            proj: If True, apply linear projection layers to image features.
+            norm: If True, normalize image features. If model is MERU, we scale
+                by alpha and map to Hyperbolic space. If model is CLIP, we apply
+                L2 normalization.
+            
         """
         self._datasets_and_prompts = datasets_and_prompts
         self._data_dir = Path(data_dir).resolve()
         self._num_workers = num_workers
+        self.proj = proj
+        self.norm = norm
         
         if isinstance(outdir, str):
             outdir = Path(outdir)
@@ -98,7 +107,9 @@ class ZeroShotClassificationEvaluator:
         model_name = model.__class__.__name__.lower()
         model_size = 'small'
         embd_dim = str(model.visual_proj.weight.shape[0]).zfill(4)
-        run_name = f'{model_name}_vit_{model_size}_{embd_dim}'
+        proj_str = 'P' if self.proj else 'X'
+        norm_str = 'N' if self.norm else 'X'
+        run_name = f'{model_name}_vit_{model_size}_{embd_dim}_E{proj_str}{norm_str}'
         outdir = self.outdir / run_name
 
         for dname, prompts in self._datasets_and_prompts.items():
@@ -164,7 +175,7 @@ class ZeroShotClassificationEvaluator:
                     num_workers=self._num_workers,
                 )
                 image_feats, labels = _encode_dataset(
-                    loader, model, project=True
+                    loader, model, project=self.proj, norm=self.norm
                     )
                 
                 # Save image features and labels.
@@ -214,6 +225,8 @@ class LinearProbeClassificationEvaluator:
         num_workers: int = 4,
         image_size: int = 224,
         tune_hyperparams: bool = False,
+        proj: bool = False,
+        norm: bool = False,
         outdir: str | Path = "embeddings",
     ):
         """
@@ -229,6 +242,10 @@ class LinearProbeClassificationEvaluator:
                 bicubic interpolation, and take a square center crop.
             tune_hyperparams: If True, perform a hyperparameter sweep over cost
                 values for logistic regression using the validation set.
+            proj: If True, apply linear projection layers to image features.
+            norm: If True, normalize image features. If model is MERU, we scale
+                by alpha and map to Hyperbolic space. If model is CLIP, we apply
+                L2 normalization.
             outdir: Directory to save extracted image features and labels for
                 each dataset.
         """
@@ -236,6 +253,8 @@ class LinearProbeClassificationEvaluator:
         self._data_dir = Path(data_dir).resolve()
         self._num_workers = num_workers
         self.tune_hyperparams = tune_hyperparams
+        self.proj = proj
+        self.norm = norm
         
         if isinstance(outdir, str):
             outdir = Path(outdir)
@@ -267,7 +286,9 @@ class LinearProbeClassificationEvaluator:
         model_name = _model.__class__.__name__.lower()
         model_size = 'small'
         embd_dim = str(_model.visual_proj.weight.shape[0]).zfill(4)
-        run_name = f'{model_name}_vit_{model_size}_{embd_dim}'
+        proj_str = 'P' if self.proj else 'X'
+        norm_str = 'N' if self.norm else 'X'
+        run_name = f'{model_name}_vit_{model_size}_{embd_dim}_E{proj_str}{norm_str}'
         outdir = self.outdir / run_name
         
         # Remove projection layer. Now `.encode_image()` will always give Euclidean
@@ -312,7 +333,7 @@ class LinearProbeClassificationEvaluator:
                         num_workers=self._num_workers,
                     )
                     image_feats[split], labels[split] = _encode_dataset(
-                        loader, _model, project=False
+                        loader, _model, project=self.proj, norm=self.norm
                     )
                     
                 # Save image features and labels.
@@ -355,6 +376,7 @@ def _encode_dataset(
     data_loader: DataLoader,
     model: MERU | CLIPBaseline,
     project: bool,
+    norm: bool = False,
 ):
     """
     Extract image features and labels for a given dataset using the given model.
@@ -364,6 +386,9 @@ def _encode_dataset(
             of `(image, label)` tuples.
         model: Model that implements `encode_image` method to extract features.
         project: Input argument to `model.encode_image`.
+        norm: If True, normalize image features. If model is MERU, we scale by 
+            alpha and map to Hyperbolic space. If model is CLIP, we apply
+            L2 normalization.
     """
 
     # Collect batches of extracted image features and labels (as-is from loader).
@@ -372,7 +397,14 @@ def _encode_dataset(
     for images, labels in tqdm(data_loader, desc=f"Extracting image feats"):
         with torch.inference_mode():
             image_feats = model.encode_image(images.to(model.device), project)
-
+            
+            if norm:
+                if isinstance(model, MERU):
+                    image_feats = image_feats * model.visual_alpha.exp()
+                    image_feats = L.exp_map0(image_feats, model.curv.exp())
+                else:
+                    F.normalize(image_feats, dim=-1)
+            
         all_image_feats.append(image_feats.cpu())
         all_labels.append(labels)
 
