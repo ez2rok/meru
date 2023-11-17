@@ -86,11 +86,11 @@ parser.add_argument(
     "localhost for single-machine training.",
 )
 parser.add_argument(
-    "overrides", nargs="...", default=[], help="Config overrides (key-value pairs)."
-)
-parser.add_argument(
     "--save-model", action="store_true",
     help="Whether to save the model after training."
+)
+parser.add_argument(
+    "overrides", nargs="...", default=[], help="Config overrides (key-value pairs)."
 )
 # fmt: on
 
