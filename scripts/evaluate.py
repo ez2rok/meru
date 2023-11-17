@@ -10,11 +10,13 @@ Evaluate a trained model using implementations from `meru.evaluation` module.
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import torch
 from omegaconf import OmegaConf
 from hydra.utils import instantiate
 from loguru import logger
+from torch.nn.parallel import DistributedDataParallel
 
 from meru.config import LazyConfig, LazyFactory
 from meru.utils.checkpointing import CheckpointManager
@@ -25,7 +27,8 @@ _AA = parser.add_argument
 _AA("--config", help="Path to an evaluation config file (.py)")
 _AA("--checkpoint-path", help="Path to checkpoint of a trained MERU/CLIP model.")
 _AA("--train-config", help="Path to train config (.yaml/py) for given checkpoint.")
-_AA("--save", action="store_true", help="If true, save evaluation artifacts.")
+_AA("--save-eval-artifacts", action="store_true", help="If true, save evaluation artifacts.")
+_AA("--save-eval-results", action="store_true", help="If true, save evaluation results.")
 _AA("--proj", action="store_true", help="If true, apply projection layer.")
 _AA("--norm", action="store_true",
     help="If true, apply normalization layer. In MERU, apply alpha scaling "
@@ -61,7 +64,26 @@ def main(_A: argparse.Namespace):
     model = LazyFactory.build_model(_C_TRAIN, device).eval()
     CheckpointManager(model=model).load(_A.checkpoint_path)
 
-    results_dict = evaluator(model, save=_A.save)
+    results_dict = evaluator(model, save=_A.save_eval_artifacts)
+    if _A.save_eval_results:
+        
+        if isinstance(model, DistributedDataParallel):
+            model = model.module
+        
+        # Make output directory.
+        model_name = model.__class__.__name__.lower()
+        model_size = 'small'
+        embd_dim = str(model.visual_proj.weight.shape[0]).zfill(4)
+        proj_str = 'P' if _C.proj else 'X'
+        norm_str = 'N' if _C.norm else 'X'
+        run_name = f'{model_name}_vit_{model_size}_{embd_dim}_E{proj_str}{norm_str}'
+        outdir = Path("results") / run_name
+        
+        eval_name = evaluator.__str__().split('.')[-1].split(' ')[0].lower()
+        OmegaConf.save(
+            OmegaConf.create(results_dict),
+            outdir / f"{eval_name}_results.yaml",
+        )
 
     # Log results for copy-pasting to spreadsheet, including checkpoint path.
     header = ",".join(results_dict.keys())
