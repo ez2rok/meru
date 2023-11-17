@@ -26,7 +26,15 @@ _AA("--config", help="Path to an evaluation config file (.py)")
 _AA("--checkpoint-path", help="Path to checkpoint of a trained MERU/CLIP model.")
 _AA("--train-config", help="Path to train config (.yaml/py) for given checkpoint.")
 _AA("--save", action="store_true", help="If true, save evaluation artifacts.")
-
+_AA("--proj", action="store_true", help="If true, apply projection layer.")
+_AA("--norm", action="store_true",
+    help="If true, apply normalization layer. In MERU, apply alpha scaling "
+    "and exponential map. In CLIP, apply L2 normalization."
+    )
+_AA(
+    "overrides", nargs="...", default=[],
+    help="Config overrides (key-value pairs)."
+    )
 
 def main(_A: argparse.Namespace):
     device = (
@@ -38,6 +46,7 @@ def main(_A: argparse.Namespace):
     # Create evaluation and training config objects.
     _C_TRAIN = LazyConfig.load(_A.train_config)
     _C = LazyConfig.load(_A.config)
+    _C = LazyConfig.apply_overrides(_C, _A.overrides)
     logger.info(OmegaConf.to_yaml(_C))
 
     logger.info("Command line args:")
