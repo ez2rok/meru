@@ -12,6 +12,7 @@ from pathlib import Path
 import torch
 import torchvision.transforms as T
 from torch.nn.parallel import DistributedDataParallel
+from torch.nn import functional as F
 from tqdm import tqdm
 from loguru import logger
 
@@ -37,6 +38,8 @@ class ZeroShotRetrievalEvaluator:
         ks: list[int] = [5, 10],
         image_size: int = 224,
         outdir: str | Path = "embeddings",
+        proj: bool = True,
+        norm: bool = False,
     ):
         """
         Args:
@@ -54,6 +57,8 @@ class ZeroShotRetrievalEvaluator:
         self._data_dir = Path(data_dir).resolve()
         self._ks = ks
         self._image_size = image_size
+        self.proj = proj
+        self.norm = norm
         
         if isinstance(outdir, str):
             outdir = Path(outdir)
@@ -108,7 +113,7 @@ class ZeroShotRetrievalEvaluator:
                 encoded_data = torch.load(encoded_data_path)
             else:
                 # Encode all images and captions.
-                encoded_data = _encode_dataset(data_loader, model)        
+                encoded_data = _encode_dataset(data_loader, model, proj=self.proj, norm=self.norm)        
                 if save:
                     logger.info(
                         f"Saving image/text features and IDs to {outdir}"
@@ -202,6 +207,8 @@ def _compute_recall(
 def _encode_dataset(
     data_loader: CocoCaptions | Flickr30kCaptions,
     model: MERU | CLIPBaseline,
+    proj: bool = True,
+    norm: bool = False,
 ):
     """
     Extract image-text features and their instance IDs using a given dataset
@@ -219,6 +226,10 @@ def _encode_dataset(
     }
 
     tokenizer = Tokenizer()
+    # check if model is an instance of torh DistributedDataParallel
+    # https://github.com/huggingface/transformers/issues/18974#issuecomment-1242985539
+    if isinstance(model, DistributedDataParallel):
+        model = model.module
 
     for inst in tqdm(data_loader, desc="Extracting image-text features"):
         # Add entries to ground-truth dict.
@@ -228,26 +239,31 @@ def _encode_dataset(
         for _id in inst["caption_ids"]:
             encoded_data["text_to_image_gt"][_id].add(image_id)
         
-        # check if model is an instance of torh DistributedDataParallel
-        # https://github.com/huggingface/transformers/issues/18974#issuecomment-1242985539
-        if isinstance(model, DistributedDataParallel):
-            model = model.module
-        
         image_feats = model.encode_image(
-            inst["image"][None, ...].to(model.device), project=True
+            inst["image"][None, ...].to(model.device), project=proj
         )
 
         caption_tokens = tokenizer(inst["captions"])
-        caption_feats = model.encode_text(caption_tokens, project=True)
-
+        caption_feats = model.encode_text(caption_tokens, project=proj)
+        
+        # Normalize features.
+        name_to_feats = {'image_feats': image_feats, 'caption_feats': caption_feats}
+        if norm:
+            for name, feats in name_to_feats.items():
+                if isinstance(model, MERU):
+                    feats = model.curv.exp(feats)
+                    name_to_feats[name] = L.exp_map0(feats, model.curv.exp())
+                else:
+                    name_to_feats[name] = F.normalize(feats, dim=-1)  
+            
         # Add current entries to extracted features and IDs.
         encoded_data["image_ids"].append(inst["image_id"])
-        encoded_data["image_feats"].append(image_feats.cpu())
+        encoded_data["image_feats"].append(name_to_feats['image_feats'].cpu())
         encoded_data["text_ids"].extend(inst["caption_ids"])
-        encoded_data["text_feats"].append(caption_feats.cpu())
+        encoded_data["text_feats"].append(name_to_feats['caption_feats'].cpu())
 
     # shape: (dataset_size, model.embed_dim), (dataset_size, model.embed_dim)
     encoded_data["image_feats"] = torch.cat(encoded_data["image_feats"], dim=0)
-    encoded_data["text_feats"] = torch.cat(encoded_data["text_feats"], dim=0)
-
+    encoded_data["text_feats"] = torch.cat(encoded_data["text_feats"], dim=0)              
+        
     return encoded_data
