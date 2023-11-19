@@ -74,10 +74,11 @@ def main(_A: argparse.Namespace):
         model_name = model.__class__.__name__.lower()
         model_size = 'small'
         embd_dim = str(model.visual_proj.weight.shape[0]).zfill(4)
-        proj_str = 'P' if _C.proj else 'X'
-        norm_str = 'N' if _C.norm else 'X'
+        proj_str = 'P' if evaluator.proj else 'X'
+        norm_str = 'N' if evaluator.norm else 'X'
         run_name = f'{model_name}_vit_{model_size}_{embd_dim}_E{proj_str}{norm_str}'
         outdir = Path("results") / run_name
+        outdir.mkdir(parents=True, exist_ok=True)
         
         eval_name = evaluator.__str__().split('.')[-1].split(' ')[0].lower()
         OmegaConf.save(
