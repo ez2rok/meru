@@ -251,7 +251,8 @@ def _encode_dataset(
         if norm:
             for name, feats in name_to_feats.items():
                 if isinstance(model, MERU):
-                    feats = model.curv.exp(feats)
+                    alpha = model.textual_alpha if name == 'caption_feats' else model.visual_alpha
+                    feats = feats * alpha.exp()
                     name_to_feats[name] = L.exp_map0(feats, model.curv.exp())
                 else:
                     name_to_feats[name] = F.normalize(feats, dim=-1)  
