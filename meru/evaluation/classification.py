@@ -133,18 +133,20 @@ class ZeroShotClassificationEvaluator:
                     class_prompts = [_pt.format(name) for _pt in prompts]
 
                     class_prompt_tokens = tokenizer(class_prompts)
-                    class_feats = model.encode_text(class_prompt_tokens, project=False)
+                    class_feats = model.encode_text(class_prompt_tokens, project=self.proj)
 
                     if isinstance(model, MERU):
                         # Ensemble in the tangent space, then project to Hyperboloid.
                         class_feats = class_feats.mean(dim=0)
-                        class_feats = class_feats * model.textual_alpha.exp()
-                        class_feats = L.exp_map0(class_feats, model.curv.exp())
+                        if self.norm:
+                            class_feats = class_feats * model.textual_alpha.exp()
+                            class_feats = L.exp_map0(class_feats, model.curv.exp())
                     else:
                         # Ensemble prompt features: normalize -> average -> normalize.
                         class_feats = F.normalize(class_feats, dim=-1)
                         class_feats = class_feats.mean(dim=0)
-                        class_feats = F.normalize(class_feats, dim=-1)
+                        if self.norm:
+                            class_feats = F.normalize(class_feats, dim=-1)
 
                     all_class_feats.append(class_feats)
 
