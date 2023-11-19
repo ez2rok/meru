@@ -73,7 +73,7 @@ def main(_A: argparse.Namespace):
         # Make output directory.
         model_name = model.__class__.__name__.lower()
         model_size = 'small'
-        embd_dim = str(model.visual_proj.weight.shape[0]).zfill(4)
+        embd_dim = str(model.textual_proj.weight.shape[0]).zfill(4)
         proj_str = 'P' if evaluator.proj else 'X'
         norm_str = 'N' if evaluator.norm else 'X'
         run_name = f'{model_name}_vit_{model_size}_{embd_dim}_E{proj_str}{norm_str}'
