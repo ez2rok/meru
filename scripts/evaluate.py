@@ -73,7 +73,7 @@ def main(_A: argparse.Namespace):
             
         # Convert all numpy floats to (standard Python) floats.
         results_dict = {
-            k: v.item() if isinstance(v, np.float64) else v
+            k: v.item() if isinstance(v, np.float64) or isinstance(v, np.float32) else v
             for k, v in results_dict.items()
             }
         
