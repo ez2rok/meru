@@ -296,8 +296,6 @@ class LinearProbeClassificationEvaluator:
         # Remove projection layer. Now `.encode_image()` will always give Euclidean
         # representations directly from the image encoder, regardless of model type.
         model = model.eval()
-        if not self.proj:
-            model.visual_proj = torch.nn.Identity()
 
         # Collect results per task in this dict:
         results_dict = {}
