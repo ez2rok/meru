@@ -293,11 +293,8 @@ class LinearProbeClassificationEvaluator:
         run_name = f'{model_name}_vit_{model_size}_{embd_dim}_E{proj_str}{norm_str}'
         outdir = self.outdir / run_name
         
-        # Remove projection layer. Now `.encode_image()` will always give Euclidean
-        # representations directly from the image encoder, regardless of model type.
-        model = model.eval()
-
         # Collect results per task in this dict:
+        model = model.eval()
         results_dict = {}
         
         for dname in self._datasets:
