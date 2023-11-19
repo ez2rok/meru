@@ -13,6 +13,7 @@ import argparse
 from pathlib import Path
 
 import torch
+import numpy as np
 from omegaconf import OmegaConf
 from hydra.utils import instantiate
 from loguru import logger
@@ -69,8 +70,14 @@ def main(_A: argparse.Namespace):
         
         if isinstance(model, DistributedDataParallel):
             model = model.module
+            
+        # Convert all numpy floats to (standard Python) floats.
+        results_dict = {
+            k: v.item() if isinstance(v, np.float64) else v
+            for k, v in results_dict.items()
+            }
         
-        # Make output directory.
+        # Make outpath.
         model_name = model.__class__.__name__.lower()
         model_size = 'small'
         embd_dim = str(model.textual_proj.weight.shape[0]).zfill(4)
@@ -78,12 +85,13 @@ def main(_A: argparse.Namespace):
         norm_str = 'N' if evaluator.norm else 'X'
         run_name = f'{model_name}_vit_{model_size}_{embd_dim}_E{proj_str}{norm_str}'
         outdir = Path("results") / run_name
-        outdir.mkdir(parents=True, exist_ok=True)
-        
         eval_name = evaluator.__str__().split('.')[-1].split(' ')[0].lower()
+        outpath = outdir / f"{eval_name}_results.yaml"
+
+        outpath.parent.mkdir(parents=True, exist_ok=True)
         OmegaConf.save(
             OmegaConf.create(results_dict),
-            outdir / f"{eval_name}_results.yaml",
+            outpath,
         )
 
     # Log results for copy-pasting to spreadsheet, including checkpoint path.
